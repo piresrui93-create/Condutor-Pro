@@ -6,6 +6,8 @@ import {
   inspectPastedText, 
   convertRowsToQuestions, 
   downloadSampleExcelTemplate, 
+  downloadAirtableCsv,
+  getAirtableTsvForClipboard,
   fetchQuestionsFromAirtableApi, 
   parseAirtableUrl,
   ExcelInspectResult, 
@@ -42,7 +44,9 @@ import {
   HelpCircle,
   Sparkles,
   RefreshCw,
-  Link2
+  Link2,
+  Copy,
+  Check
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -69,10 +73,11 @@ export const AdminDashboard: React.FC = () => {
   const [isImporting, setIsImporting] = useState(false);
   const [showAirtableModal, setShowAirtableModal] = useState(false);
   const [airtableToken, setAirtableToken] = useState(() => localStorage.getItem('condutorpro_airtable_token') || '');
-  const [airtableBaseId, setAirtableBaseId] = useState(() => localStorage.getItem('condutorpro_airtable_base_id') || '');
-  const [airtableTable, setAirtableTable] = useState(() => localStorage.getItem('condutorpro_airtable_table') || 'Perguntas');
-  const [airtableUrlInput, setAirtableUrlInput] = useState('');
+  const [airtableBaseId, setAirtableBaseId] = useState(() => localStorage.getItem('condutorpro_airtable_base_id') || 'appUE8v1QiipoQRKy');
+  const [airtableTable, setAirtableTable] = useState(() => localStorage.getItem('condutorpro_airtable_table') || 'tblI3NbgzjCKlruXc');
+  const [airtableUrlInput, setAirtableUrlInput] = useState('https://airtable.com/appUE8v1QiipoQRKy/tblI3NbgzjCKlruXc');
   const [airtableLoading, setAirtableLoading] = useState(false);
+  const [copyAirtableSuccess, setCopyAirtableSuccess] = useState(false);
   const [importTargetCategory, setImportTargetCategory] = useState<DriverCategory | 'Todas as Categorias'>('Todas as Categorias');
   const [lastSyncInfo, setLastSyncInfo] = useState<{ timestamp: string; count: number } | null>(() => {
     const saved = localStorage.getItem('condutorpro_airtable_last_sync');
@@ -85,6 +90,13 @@ export const AdminDashboard: React.FC = () => {
     }
     return null;
   });
+
+  const handleCopyAirtableData = () => {
+    const tsv = getAirtableTsvForClipboard();
+    navigator.clipboard.writeText(tsv);
+    setCopyAirtableSuccess(true);
+    setTimeout(() => setCopyAirtableSuccess(false), 3500);
+  };
 
   // Column Mapping & Clipboard Paste Modal state
   const [inspectResult, setInspectResult] = useState<ExcelInspectResult | null>(null);
@@ -807,16 +819,48 @@ export const AdminDashboard: React.FC = () => {
               </div>
 
               {/* Supported Columns Badge List */}
-              <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-1 text-[10px] text-slate-400">
-                <span className="font-semibold text-slate-300 mr-1">8 Colunas suportadas:</span>
-                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">1. Pergunta</span>
-                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">2. ID</span>
-                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">3. Tema</span>
-                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">4. Imagem</span>
-                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">5. nome da Imagem</span>
-                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">6. Opção A</span>
-                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">7. Opção B</span>
-                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-emerald-400 font-mono">8. Resposta Correta</span>
+              <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-1 text-[10px] text-slate-400">
+                  <span className="font-semibold text-slate-300 mr-1">8 Colunas da sua base:</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">1. Pergunta</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">2. ID</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">3. Tema</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">4. Imagem</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">5. nome da Imagem</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">6. Opção A</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">7. Opção B</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-emerald-400 font-mono">8. Resposta Correta</span>
+                </div>
+
+                {/* Pre-fill Helpers */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyAirtableData}
+                    className="px-2.5 py-1 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 text-[11px] font-bold flex items-center gap-1.5 transition-colors"
+                  >
+                    {copyAirtableSuccess ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-400">15 Perguntas Copiadas (Cole com Ctrl+V)!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copiar 15 Perguntas p/ Colar no Airtable</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={downloadAirtableCsv}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[11px] font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Descarregar CSV p/ Airtable</span>
+                  </button>
+                </div>
               </div>
             </div>
 

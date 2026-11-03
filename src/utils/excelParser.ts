@@ -813,65 +813,233 @@ export async function fetchQuestionsFromAirtableApi(
   };
 }
 
+export const SAMPLE_AIRTABLE_QUESTIONS = [
+  {
+    'Pergunta': 'A que velocidade máxima pode circular um automóvel ligeiro de passageiros numa autoestrada com boas condições meteorológicas?',
+    'ID': 'Q-001',
+    'Tema': 'Velocidades e Distâncias',
+    'Imagem': 'https://images.unsplash.com/photo-1542282088-72c9c27ed0cd?w=800',
+    'nome da Imagem': 'Autoestrada reta com circulação fluida',
+    'Opção A': '120 km/h',
+    'Opção B': '100 km/h',
+    'Resposta Correta': 'A'
+  },
+  {
+    'Pergunta': 'Numa rotunda de duas vias, quem pretende sair na primeira saída deve ocupar a via:',
+    'ID': 'Q-002',
+    'Tema': 'Manobras e Vias Especiais',
+    'Imagem': 'https://images.unsplash.com/photo-1517524008697-84bbe3c3fd98?w=800',
+    'nome da Imagem': 'Praça de sentido giratório devidamente sinalizada',
+    'Opção A': 'Mais à direita',
+    'Opção B': 'Mais à esquerda',
+    'Resposta Correta': 'A'
+  },
+  {
+    'Pergunta': 'Perante um sinal de STOP (B2), a paragem é obrigatória mesmo que não se aproximem outros veículos?',
+    'ID': 'Q-003',
+    'Tema': 'Sinais de Trânsito',
+    'Imagem': 'https://images.unsplash.com/photo-1584824486509-112e4181ff6b?w=800',
+    'nome da Imagem': 'Sinal octogonal de paragem obrigatória',
+    'Opção A': 'Sim, é sempre obrigatório parar completamente',
+    'Opção B': 'Não, apenas se aproximar trânsito prioritário',
+    'Resposta Correta': 'A'
+  },
+  {
+    'Pergunta': 'Para condutores em regime probatório (menos de 3 anos de carta), qual a taxa máxima de alcoolemia permitida por lei?',
+    'ID': 'Q-004',
+    'Tema': 'Segurança Rodoviária, Luzes e Álcool',
+    'Imagem': 'https://images.unsplash.com/photo-1508974239320-0a029497e820?w=800',
+    'nome da Imagem': 'Operação de fiscalização e controlo rodoviário',
+    'Opção A': '0,20 g/l no sangue',
+    'Opção B': '0,50 g/l no sangue',
+    'Resposta Correta': 'A'
+  },
+  {
+    'Pergunta': 'Num cruzamento sem qualquer sinalização vertical ou luminosa, a prioridade pertence ao veículo que se apresenta:',
+    'ID': 'Q-005',
+    'Tema': 'Regras de Prioridade e Cruzamentos',
+    'Imagem': 'https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?w=800',
+    'nome da Imagem': 'Interseção urbana de nível sem semáforos',
+    'Opção A': 'Pela direita',
+    'Opção B': 'Pela esquerda',
+    'Resposta Correta': 'A'
+  },
+  {
+    'Pergunta': 'Durante a noite e com nevoeiro denso, é permitido o uso de luzes de nevoeiro à frente?',
+    'ID': 'Q-006',
+    'Tema': 'Segurança Rodoviária, Luzes e Álcool',
+    'Imagem': 'https://images.unsplash.com/photo-1509114397022-ed747cca3f65?w=800',
+    'nome da Imagem': 'Veículo em circulação noturna sob nevoeiro',
+    'Opção A': 'Sim, sempre que as condições meteorológicas o justifiquem',
+    'Opção B': 'Não, são proibidas em qualquer circunstância',
+    'Resposta Correta': 'A'
+  },
+  {
+    'Pergunta': 'A profundidade mínima legal dos relevos principais dos pneus de um veículo ligeiro de passageiros é de:',
+    'ID': 'Q-007',
+    'Tema': 'Mecânica Básica e Equipamentos',
+    'Imagem': 'https://images.unsplash.com/photo-1486006920555-c77dce18193b?w=800',
+    'nome da Imagem': 'Pneu e roda de automóvel ligeiro',
+    'Opção A': '1,6 milímetros',
+    'Opção B': '1,0 milímetro',
+    'Resposta Correta': 'A'
+  },
+  {
+    'Pergunta': 'O condutor que realiza uma manobra de inversão do sentido de marcha numa autoestrada comete uma infração:',
+    'ID': 'Q-008',
+    'Tema': 'Manobras e Vias Especiais',
+    'Imagem': 'https://images.unsplash.com/photo-1542282088-72c9c27ed0cd?w=800',
+    'nome da Imagem': 'Traçado de autoestrada com separador central',
+    'Opção A': 'Muito grave',
+    'Opção B': 'Leve',
+    'Resposta Correta': 'A'
+  },
+  {
+    'Pergunta': 'A ultrapassagem de veículos deve, como regra geral, ser efetuada pela:',
+    'ID': 'Q-009',
+    'Tema': 'Regras de Prioridade e Cruzamentos',
+    'Imagem': 'https://images.unsplash.com/photo-1506015391300-4802dc74de2e?w=800',
+    'nome da Imagem': 'Faixa de rodagem com duas vias no mesmo sentido',
+    'Opção A': 'Esquerda',
+    'Opção B': 'Direita',
+    'Resposta Correta': 'A'
+  },
+  {
+    'Pergunta': 'A utilização do colete retrorrefletor é obrigatória quando o condutor sai do veículo na berma de uma via rápida?',
+    'ID': 'Q-010',
+    'Tema': 'Segurança Rodoviária, Luzes e Álcool',
+    'Imagem': 'https://images.unsplash.com/photo-1517524008697-84bbe3c3fd98?w=800',
+    'nome da Imagem': 'Paragem forçada em berma de estrada',
+    'Opção A': 'Sim, antes de sair da viatura',
+    'Opção B': 'Não, é apenas recomendado',
+    'Resposta Correta': 'A'
+  },
+  {
+    'Pergunta': 'Qual é o limite geral de velocidade dentro das localidades para um automóvel ligeiro de passageiros?',
+    'ID': 'Q-011',
+    'Tema': 'Velocidades e Distâncias',
+    'Imagem': 'https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?w=800',
+    'nome da Imagem': 'Arruamento urbano dentro de localidade',
+    'Opção A': '50 km/h',
+    'Opção B': '60 km/h',
+    'Resposta Correta': 'A'
+  },
+  {
+    'Pergunta': 'É permitido parar ou estacionar a menos de 5 metros antes de uma passagem assinalada para peões (passadeira)?',
+    'ID': 'Q-012',
+    'Tema': 'Manobras e Vias Especiais',
+    'Imagem': 'https://images.unsplash.com/photo-1520694478166-daaaaaec7a0e?w=800',
+    'nome da Imagem': 'Passadeira de peões na via pública',
+    'Opção A': 'Não, é estritamente proibido',
+    'Opção B': 'Sim, desde que com quatro piscas ligados',
+    'Resposta Correta': 'A'
+  },
+  {
+    'Pergunta': 'Perante a luz amarela contínua do semáforo, o condutor deve:',
+    'ID': 'Q-013',
+    'Tema': 'Sinais de Trânsito',
+    'Imagem': 'https://images.unsplash.com/photo-1508974239320-0a029497e820?w=800',
+    'nome da Imagem': 'Semáforo regulador de tráfego com luz amarela',
+    'Opção A': 'Parar, a menos que não o possa fazer com segurança',
+    'Opção B': 'Acelerar sempre para atravessar o cruzamento',
+    'Resposta Correta': 'A'
+  },
+  {
+    'Pergunta': 'Em caso de avaria num túnel ou autoestrada, a colocação do sinal de pré-sinalização de perigo (triângulo) deve ser feita a pelo menos:',
+    'ID': 'Q-014',
+    'Tema': 'Segurança Rodoviária, Luzes e Álcool',
+    'Imagem': 'https://images.unsplash.com/photo-1509114397022-ed747cca3f65?w=800',
+    'nome da Imagem': 'Sinalização de veículo imobilizado por avaria',
+    'Opção A': '30 metros do veículo e visível a 100 metros',
+    'Opção B': '10 metros do veículo',
+    'Resposta Correta': 'A'
+  },
+  {
+    'Pergunta': 'O nível de óleo do motor deve ser verificado preferencialmente com:',
+    'ID': 'Q-015',
+    'Tema': 'Mecânica Básica e Equipamentos',
+    'Imagem': 'https://images.unsplash.com/photo-1486006920555-c77dce18193b?w=800',
+    'nome da Imagem': 'Vareta de medição de nível de óleo do motor',
+    'Opção A': 'O motor frio e veículo em terreno horizontal',
+    'Opção B': 'O motor ligado e quente',
+    'Resposta Correta': 'A'
+  }
+];
+
 /**
- * Generates and downloads a clean, ready-to-fill Excel template for driving questions
+ * Downloads ready-to-import CSV or Excel file specifically matched to the user's 8 Airtable columns:
+ * Pergunta, ID, Tema, Imagem, nome da Imagem, Opção A, Opção B, Resposta Correta
  */
 export function downloadSampleExcelTemplate() {
-  const sampleData = [
-    {
-      'Pergunta': 'A que velocidade máxima pode transitar um automóvel ligeiro de passageiros numa autoestrada?',
-      'Opção A': '100 km/h',
-      'Opção B': '120 km/h',
-      'Opção C': '90 km/h',
-      'Resposta Certa': 'B',
-      'Fotografia': '/src/assets/images/highway_speed_limit_1793442881776.jpg',
-      'Tema': 'Velocidades e Distâncias',
-      'Artigo': 'Artigo 27.º do Código da Estrada',
-      'Explicação': 'O limite máximo para ligeiros de passageiros em autoestrada é de 120 km/h.',
-      'Dificuldade': 'Fácil'
-    },
-    {
-      'Pergunta': 'Numa rotunda de duas vias, quem pretende sair na primeira saída deve ocupar:',
-      'Opção A': 'A via da esquerda',
-      'Opção B': 'A via mais à direita',
-      'Opção C': 'Qualquer via',
-      'Resposta Certa': 'B',
-      'Fotografia': '/src/assets/images/traffic_roundabout_junction_1793442880154.jpg',
-      'Tema': 'Manobras e Vias Especiais',
-      'Artigo': 'Artigo 14.º-A do Código da Estrada',
-      'Explicação': 'Para sair na primeira saída, o condutor deve circular na via mais à direita.',
-      'Dificuldade': 'Difícil'
-    },
-    {
-      'Pergunta': 'A taxa limite de álcool no sangue para um condutor recém-encartado (regime probatório) é:',
-      'Opção A': '0,50 g/l',
-      'Opção B': '0,20 g/l',
-      'Opção C': '0,00 g/l',
-      'Resposta Certa': 'B',
-      'Fotografia': '/src/assets/images/crossroad_priority_1793442881747.jpg',
-      'Tema': 'Segurança Rodoviária, Luzes e Álcool',
-      'Artigo': 'Artigo 81.º do Código da Estrada',
-      'Explicação': 'No regime probatório a taxa de alcoolemia tolerada é até 0,20 g/l.',
-      'Dificuldade': 'Difícil'
-    }
-  ];
-
-  const worksheet = XLSX.utils.json_to_sheet(sampleData);
+  const worksheet = XLSX.utils.json_to_sheet(SAMPLE_AIRTABLE_QUESTIONS);
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Perguntas_Exame');
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Perguntas');
 
   worksheet['!cols'] = [
-    { wch: 60 },
-    { wch: 20 },
-    { wch: 20 },
-    { wch: 20 },
-    { wch: 15 },
-    { wch: 45 },
-    { wch: 30 },
-    { wch: 30 },
-    { wch: 50 },
-    { wch: 15 },
+    { wch: 60 }, // Pergunta
+    { wch: 10 }, // ID
+    { wch: 30 }, // Tema
+    { wch: 55 }, // Imagem
+    { wch: 40 }, // nome da Imagem
+    { wch: 35 }, // Opção A
+    { wch: 35 }, // Opção B
+    { wch: 15 }, // Resposta Correta
   ];
 
-  XLSX.writeFile(workbook, 'Modelo_Perguntas_CondutorPRO.xlsx');
+  XLSX.writeFile(workbook, 'Perguntas_Airtable_CondutorPRO.xlsx');
+}
+
+/**
+ * Downloads a CSV version directly formatted for Airtable's CSV Importer
+ */
+export function downloadAirtableCsv() {
+  const headers = ['Pergunta', 'ID', 'Tema', 'Imagem', 'nome da Imagem', 'Opção A', 'Opção B', 'Resposta Correta'];
+  const csvRows = [
+    headers.map(h => `"${h.replace(/"/g, '""')}"`).join(',')
+  ];
+
+  SAMPLE_AIRTABLE_QUESTIONS.forEach(row => {
+    const values = [
+      row['Pergunta'],
+      row['ID'],
+      row['Tema'],
+      row['Imagem'],
+      row['nome da Imagem'],
+      row['Opção A'],
+      row['Opção B'],
+      row['Resposta Correta']
+    ];
+    csvRows.push(values.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','));
+  });
+
+  const blob = new Blob([csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', 'perguntas_airtable.csv');
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Returns tab-separated values ready to be copied and pasted directly into Airtable with Ctrl+V
+ */
+export function getAirtableTsvForClipboard(): string {
+  const headers = ['Pergunta', 'ID', 'Tema', 'Imagem', 'nome da Imagem', 'Opção A', 'Opção B', 'Resposta Correta'];
+  const lines = [headers.join('\t')];
+  SAMPLE_AIRTABLE_QUESTIONS.forEach(row => {
+    lines.push([
+      row['Pergunta'],
+      row['ID'],
+      row['Tema'],
+      row['Imagem'],
+      row['nome da Imagem'],
+      row['Opção A'],
+      row['Opção B'],
+      row['Resposta Correta']
+    ].join('\t'));
+  });
+  return lines.join('\n');
 }
