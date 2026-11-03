@@ -1,0 +1,6 @@
+{
+  "name": "CondutorPRO - Simulador de Exames de Código IMT",
+  "description": "Simulador oficial de exames de código de condução em Portugal. 30 perguntas, 30 minutos, aprovação a 27+, testes por tema, perguntas mais difíceis, gestão de faturação Stripe e importação de Excel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
