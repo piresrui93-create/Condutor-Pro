@@ -549,10 +549,13 @@ export async function fetchQuestionsFromAirtableApi(
   tableName: string,
   targetCategory: DriverCategory | 'Todas as Categorias' = 'Todas as Categorias'
 ): Promise<ExcelParseResult> {
-  const cleanToken = personalAccessToken.replace(/^Bearer\s+/i, '').trim();
+  const cleanToken = personalAccessToken
+    .replace(/^Bearer\s+/i, '')
+    .replace(/[\r\n\t"']/g, '')
+    .trim();
   
-  let cleanBase = baseId.trim();
-  let cleanTable = tableName.trim();
+  let cleanBase = baseId.replace(/[\r\n\t"']/g, '').trim();
+  let cleanTable = tableName.replace(/[\r\n\t"']/g, '').trim();
 
   // If user pasted a full Airtable URL in baseId or tableName, auto-extract
   const parsedBase = parseAirtableUrl(cleanBase);
@@ -571,7 +574,7 @@ export async function fetchQuestionsFromAirtableApi(
   }
 
   if (!cleanBase.startsWith('app') && cleanBase.length < 10) {
-    throw new Error('Base ID inválido. No Airtable o Base ID começa com "app..." (ex: appAbc123XyZ).');
+    throw new Error('Base ID inválido. No Airtable o Base ID começa com "app..." (ex: appUE8v1QiipoQRKy).');
   }
 
   const encodedTable = encodeURIComponent(cleanTable);
@@ -589,12 +592,27 @@ export async function fetchQuestionsFromAirtableApi(
 
     if (!response.ok) {
       const errorText = await response.text();
+      let airtableMsg = '';
+      try {
+        const parsed = JSON.parse(errorText);
+        if (parsed.error?.message) {
+          airtableMsg = ` (${parsed.error.message})`;
+        } else if (parsed.error?.type) {
+          airtableMsg = ` [${parsed.error.type}]`;
+        }
+      } catch {
+        airtableMsg = errorText ? ` (${errorText.slice(0, 100)})` : '';
+      }
+
       if (response.status === 401) {
-        throw new Error('Airtable API (401 - Não Autorizado): O Personal Access Token é inválido. Aceda a airtable.com/create/tokens para criar um token com permissão "data.records:read".');
+        if (cleanToken.startsWith('tok')) {
+          throw new Error(`Airtable API (401 - Não Autorizado)${airtableMsg}: O código inserido começa por "tok...". Esse é o "Token ID" (o identificador público) e NÃO o segredo. O token de acesso real começa por "pat..." e só aparece uma vez no ecrã logo após clicar em "Create token".`);
+        }
+        throw new Error(`Airtable API (401 - Não Autorizado)${airtableMsg}: Certifique-se de que: 1) O token começa por "pat..."; 2) No menu "Access" do token selecionou a base "appUE8v1QiipoQRKy" (ou "All current and future bases"); 3) No menu "Scopes" marcou "data.records:read".`);
       } else if (response.status === 403) {
-        throw new Error('Airtable API (403 - Proibido): O seu token não tem acesso a esta base. Verifique se deu acesso à base correta e adicionou o scope "data.records:read" em airtable.com/create/tokens.');
+        throw new Error(`Airtable API (403 - Proibido)${airtableMsg}: O token não tem acesso a esta base. Aceda a airtable.com/create/tokens, edite o seu token e adicione a base à lista "Access".`);
       } else if (response.status === 404) {
-        throw new Error(`Airtable API (404 - Não Encontrado): Base ID ("${cleanBase}") ou Tabela ("${cleanTable}") não encontrados. Verifique o Base ID e certifique-se de que o nome da tabela corresponde exatamente ao separador.`);
+        throw new Error(`Airtable API (404 - Não Encontrado)${airtableMsg}: Base ID ("${cleanBase}") ou Tabela ("${cleanTable}") não encontrados. Verifique se o nome da tabela corresponde exatamente ao separador.`);
       }
       throw new Error(`Erro na API Airtable (${response.status}): ${errorText}`);
     }

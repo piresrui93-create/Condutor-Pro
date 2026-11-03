@@ -1638,9 +1638,9 @@ export const AdminDashboard: React.FC = () => {
             <div className="p-3.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-xs text-blue-900 dark:text-blue-300 space-y-2">
               <div className="font-bold flex items-center gap-1.5 text-blue-800 dark:text-blue-200">
                 <Sparkles className="w-4 h-4 text-blue-500" />
-                <span>Como gerar o seu Token Airtable em 30 segundos:</span>
+                <span>Como gerar o seu Token Airtable e evitar o erro 401:</span>
               </div>
-              <ol className="list-decimal list-inside space-y-1 text-[11px] pl-1 leading-relaxed">
+              <ol className="list-decimal list-inside space-y-1.5 text-[11px] pl-1 leading-relaxed">
                 <li>
                   Aceda a{' '}
                   <a
@@ -1654,8 +1654,11 @@ export const AdminDashboard: React.FC = () => {
                   </a>{' '}
                   e clique em <strong>"Create token"</strong>.
                 </li>
-                <li>Dê um nome (ex: <em>CondutorPRO</em>) e adicione o Scope <strong>data.records:read</strong>.</li>
-                <li>Na secção <strong>Access</strong>, selecione a sua Base que contém as perguntas e clique em Criar.</li>
+                <li>Dê um nome (ex: <em>CondutorPRO</em>) e em <strong>Scopes</strong> adicione <strong>data.records:read</strong>.</li>
+                <li className="font-semibold text-blue-950 dark:text-blue-100">
+                  ⚠️ Ponto Crítico (causa do erro 401): Em <strong>"Access"</strong>, clique em <strong>"+ Add a base"</strong> e selecione a sua base (ou escolha <em>"All current and future bases in this workspace"</em>). Se não selecionar a base, o Airtable rejeita o acesso com 401!
+                </li>
+                <li>Clique em <strong>"Create token"</strong> e copie a chave secreta que começa por <strong>pat...</strong> (só aparece uma vez).</li>
               </ol>
             </div>
 
@@ -1667,15 +1670,29 @@ export const AdminDashboard: React.FC = () => {
                   1. Personal Access Token (PAT) *
                 </label>
                 <input
-                  type="password"
+                  type="text"
                   required
                   value={airtableToken}
-                  onChange={(e) => setAirtableToken(e.target.value.trim())}
+                  onChange={(e) => setAirtableToken(e.target.value.trim().replace(/["']/g, ''))}
                   placeholder="pat..."
                   className="w-full px-3 py-2 font-mono bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 />
-                <span className="text-[10px] text-slate-500 mt-0.5 block">
-                  O seu token é guardado com segurança localmente no seu navegador para sincronizações futuras com 1 clique.
+
+                {/* Validation Warnings */}
+                {airtableToken && airtableToken.startsWith('tok') && (
+                  <div className="p-2.5 mt-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-[11px] text-rose-800 dark:text-rose-200 font-medium">
+                    ⚠️ <strong>Atenção:</strong> O código inserido começa por <code>tok...</code>. Esse é apenas o Token ID público e NÃO o token de acesso! O token de acesso do Airtable começa sempre por <code>pat...</code>. Aceda novamente a <a href="https://airtable.com/create/tokens" target="_blank" rel="noreferrer" className="underline font-bold">airtable.com/create/tokens</a> e crie um novo token copiando a chave <code>pat...</code>.
+                  </div>
+                )}
+
+                {airtableToken && !airtableToken.startsWith('pat') && !airtableToken.startsWith('tok') && (
+                  <div className="p-2.5 mt-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-200 font-medium">
+                    ⚠️ <strong>Aviso:</strong> O token não começa por <code>pat...</code>. Os tokens de acesso pessoal do Airtable têm o formato <code>patXXXXXXXX.YYYYYYYY</code>. Certifique-se de que não colou outro valor.
+                  </div>
+                )}
+
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  O seu token é guardado com segurança localmente no seu navegador para sincronizações com 1 clique.
                 </span>
               </div>
 
