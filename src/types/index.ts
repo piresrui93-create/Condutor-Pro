@@ -4,7 +4,8 @@ export type QuestionCategory =
   | 'Velocidades e Distâncias'
   | 'Manobras e Vias Especiais'
   | 'Segurança Rodoviária, Luzes e Álcool'
-  | 'Mecânica Básica e Equipamentos';
+  | 'Mecânica Básica e Equipamentos'
+  | (string & {});
 
 export type QuestionDifficulty = 'easy' | 'medium' | 'hard';
 

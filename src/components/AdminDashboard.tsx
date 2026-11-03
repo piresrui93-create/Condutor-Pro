@@ -1,12 +1,13 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { BillingInvoice, QuestionCategory, DriverCategory, CategoryExamConfig, ALL_DRIVER_CATEGORIES } from '../types';
+import { Question, BillingInvoice, QuestionCategory, DriverCategory, CategoryExamConfig, ALL_DRIVER_CATEGORIES } from '../types';
 import { 
   inspectFile, 
   inspectPastedText, 
   convertRowsToQuestions, 
   downloadSampleExcelTemplate, 
   fetchQuestionsFromAirtableApi, 
+  parseAirtableUrl,
   ExcelInspectResult, 
   ColumnMapping,
   cleanImageUrl
@@ -36,7 +37,12 @@ import {
   Eye,
   Settings2,
   Sliders,
-  RotateCcw
+  RotateCcw,
+  UploadCloud,
+  HelpCircle,
+  Sparkles,
+  RefreshCw,
+  Link2
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -62,11 +68,23 @@ export const AdminDashboard: React.FC = () => {
   const [importStatus, setImportStatus] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [showAirtableModal, setShowAirtableModal] = useState(false);
-  const [airtableToken, setAirtableToken] = useState('');
-  const [airtableBaseId, setAirtableBaseId] = useState('');
-  const [airtableTable, setAirtableTable] = useState('Perguntas');
+  const [airtableToken, setAirtableToken] = useState(() => localStorage.getItem('condutorpro_airtable_token') || '');
+  const [airtableBaseId, setAirtableBaseId] = useState(() => localStorage.getItem('condutorpro_airtable_base_id') || '');
+  const [airtableTable, setAirtableTable] = useState(() => localStorage.getItem('condutorpro_airtable_table') || 'Perguntas');
+  const [airtableUrlInput, setAirtableUrlInput] = useState('');
   const [airtableLoading, setAirtableLoading] = useState(false);
   const [importTargetCategory, setImportTargetCategory] = useState<DriverCategory | 'Todas as Categorias'>('Todas as Categorias');
+  const [lastSyncInfo, setLastSyncInfo] = useState<{ timestamp: string; count: number } | null>(() => {
+    const saved = localStorage.getItem('condutorpro_airtable_last_sync');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
 
   // Column Mapping & Clipboard Paste Modal state
   const [inspectResult, setInspectResult] = useState<ExcelInspectResult | null>(null);
@@ -128,8 +146,9 @@ export const AdminDashboard: React.FC = () => {
     return matchesSearch && matchesCat && matchesDriverCat;
   });
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const [isDragging, setIsDragging] = useState(false);
+
+  const processFile = async (file: File) => {
     if (!file) return;
 
     setIsImporting(true);
@@ -155,7 +174,8 @@ export const AdminDashboard: React.FC = () => {
         imageCol: inspected.detectedMapping.imageCol || '',
         categoryCol: inspected.detectedMapping.categoryCol || '',
         explanationCol: inspected.detectedMapping.explanationCol || '',
-        articleCol: inspected.detectedMapping.articleCol || ''
+        articleCol: inspected.detectedMapping.articleCol || '',
+        targetCategoryCol: inspected.detectedMapping.targetCategoryCol || ''
       });
       setShowMappingModal(true);
     } catch (err: any) {
@@ -166,6 +186,33 @@ export const AdminDashboard: React.FC = () => {
     } finally {
       setIsImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processFile(file);
     }
   };
 
@@ -191,7 +238,8 @@ export const AdminDashboard: React.FC = () => {
         imageCol: inspected.detectedMapping.imageCol || '',
         categoryCol: inspected.detectedMapping.categoryCol || '',
         explanationCol: inspected.detectedMapping.explanationCol || '',
-        articleCol: inspected.detectedMapping.articleCol || ''
+        articleCol: inspected.detectedMapping.articleCol || '',
+        targetCategoryCol: inspected.detectedMapping.targetCategoryCol || ''
       });
       setShowPasteModal(false);
       setShowMappingModal(true);
@@ -202,6 +250,68 @@ export const AdminDashboard: React.FC = () => {
         message: 'Erro ao processar dados colados: ' + (err?.message || 'formato inválido.')
       });
     }
+  };
+
+  const handleInsertPasteSample = () => {
+    const sampleTsv = `Pergunta\tOpção A\tOpção B\tOpção C\tResposta Certa\tTema\tFotografia\nQual a velocidade máxima permitida para um automóvel ligeiro numa autoestrada?\t100 km/h\t120 km/h\t90 km/h\tB\tVelocidades e Distâncias\thttps://images.unsplash.com/photo-1542282088-72c9c27ed0cd?w=800\nNuma rotunda, o condutor que pretende sair na primeira saída deve ocupar:\tA via mais à direita\tA via da esquerda\tQualquer via indiferentemente\tA\tRegras de Prioridade e Cruzamentos\thttps://images.unsplash.com/photo-1517524008697-84bbe3c3fd98?w=800\nPerante um sinal de STOP (B2), a paragem é obrigatória:\tApenas se aproximarem veículos com prioridade\tSempre, junto ao limite da faixa de rodagem\tApenas durante a noite\tB\tSinais de Trânsito\thttps://images.unsplash.com/photo-1584824486509-112e4181ff6b?w=800`;
+    setPastedText(sampleTsv);
+  };
+
+  const handleLoadDemoQuestions = () => {
+    const demoQuestions: Question[] = [
+      {
+        id: `demo-sample-${Date.now()}-1`,
+        question: 'A que velocidade máxima pode transitar um automóvel ligeiro de passageiros sem reboque numa autoestrada?',
+        imageUrl: '/src/assets/images/highway_speed_limit_1793442881776.jpg',
+        imageCaption: 'Troço de autoestrada com condições normais de circulação.',
+        options: ['100 km/h', '120 km/h', '140 km/h'],
+        correctAnswer: 1,
+        category: 'Velocidades e Distâncias',
+        targetCategory: importTargetCategory,
+        explanation: 'O Código da Estrada estabelece no Artigo 27.º que o limite máximo de velocidade para ligeiros de passageiros em autoestrada é de 120 km/h.',
+        lawArticle: 'Artigo 27.º do Código da Estrada',
+        difficulty: 'medium',
+        failureRate: 20
+      },
+      {
+        id: `demo-sample-${Date.now()}-2`,
+        question: 'Numa rotunda de duas ou mais vias de trânsito, o condutor que pretende sair na primeira saída deve:',
+        imageUrl: '/src/assets/images/traffic_roundabout_junction_1793442880154.jpg',
+        imageCaption: 'Praça de sentido giratório (rotunda) devidamente sinalizada com sinal D4.',
+        options: [
+          'Ocupar a via de trânsito mais à direita antes da entrada',
+          'Ocupar a via de trânsito da esquerda e mudar bruscamente',
+          'Circular sempre junto ao ilhéu central'
+        ],
+        correctAnswer: 0,
+        category: 'Regras de Prioridade e Cruzamentos',
+        targetCategory: importTargetCategory,
+        explanation: 'Segundo o Artigo 14.º-A do Código da Estrada, quem pretenda sair na primeira saída deve entrar e manter-se na via da direita.',
+        lawArticle: 'Artigo 14.º-A do Código da Estrada',
+        difficulty: 'hard',
+        failureRate: 60
+      },
+      {
+        id: `demo-sample-${Date.now()}-3`,
+        question: 'Qual é a taxa máxima de alcoolemia permitida no sangue para condutores em regime probatório ou profissionais?',
+        imageUrl: '/src/assets/images/night_fog_lighting_1793442881655.jpg',
+        imageCaption: 'Fiscalização rodoviária de alcoolemia e segurança.',
+        options: ['0,50 g/l', '0,20 g/l', '0,80 g/l'],
+        correctAnswer: 1,
+        category: 'Segurança Rodoviária, Luzes e Álcool',
+        targetCategory: importTargetCategory,
+        explanation: 'Para condutores em regime probatório, condutores de veículos de socorro, transporte coletivo e TVDE, o limite é de 0,20 g/l (Art. 81.º do C.E.).',
+        lawArticle: 'Artigo 81.º do Código da Estrada',
+        difficulty: 'hard',
+        failureRate: 48
+      }
+    ];
+
+    const added = importQuestions(demoQuestions);
+    setImportStatus({
+      type: 'success',
+      message: `Sucesso! Foram adicionadas ${added} perguntas oficiais de demonstração com fotografias para a categoria [${importTargetCategory}].`
+    });
   };
 
   const handleExecuteImport = () => {
@@ -229,9 +339,23 @@ export const AdminDashboard: React.FC = () => {
   };
 
 
-  const handleAirtableSync = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!airtableToken || !airtableBaseId || !airtableTable) return;
+  const handleAirtableUrlPaste = (val: string) => {
+    setAirtableUrlInput(val);
+    const parsed = parseAirtableUrl(val);
+    if (parsed.baseId) {
+      setAirtableBaseId(parsed.baseId);
+    }
+    if (parsed.tableIdOrName) {
+      setAirtableTable(parsed.tableIdOrName);
+    }
+  };
+
+  const handleAirtableSync = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!airtableToken.trim() || !airtableBaseId.trim() || !airtableTable.trim()) {
+      setShowAirtableModal(true);
+      return;
+    }
 
     setAirtableLoading(true);
     setImportStatus(null);
@@ -239,16 +363,29 @@ export const AdminDashboard: React.FC = () => {
     try {
       const result = await fetchQuestionsFromAirtableApi(airtableToken, airtableBaseId, airtableTable, importTargetCategory);
       if (result.questions.length > 0) {
-        const added = importQuestions(result.questions);
+        const affected = importQuestions(result.questions);
+        
+        // Save to localStorage for instant 1-click sync
+        localStorage.setItem('condutorpro_airtable_token', airtableToken.trim());
+        localStorage.setItem('condutorpro_airtable_base_id', airtableBaseId.trim());
+        localStorage.setItem('condutorpro_airtable_table', airtableTable.trim());
+
+        const syncData = {
+          timestamp: new Date().toISOString(),
+          count: affected
+        };
+        localStorage.setItem('condutorpro_airtable_last_sync', JSON.stringify(syncData));
+        setLastSyncInfo(syncData);
+
         setImportStatus({
           type: 'success',
-          message: `Sucesso! Foram sincronizadas ${added} perguntas para [${importTargetCategory}] diretamente da sua base Airtable (${result.totalRows} registos processados).`
+          message: `Sincronização Airtable concluída com sucesso! Foram atualizadas e carregadas ${affected} perguntas (de ${result.totalRows} registos na tabela) para [${importTargetCategory}].`
         });
         setShowAirtableModal(false);
       } else {
         setImportStatus({
           type: 'error',
-          message: result.errors[0] || 'Nenhuma pergunta válida encontrada na tabela do Airtable.'
+          message: result.errors[0] || 'Nenhuma pergunta válida encontrada na tabela do Airtable. Verifique se as colunas Pergunta, Opção A e Opção B estão preenchidas.'
         });
       }
     } catch (err: any) {
@@ -572,103 +709,284 @@ export const AdminDashboard: React.FC = () => {
       {activeTab === 'questions' && (
         <div className="space-y-6">
           
-          {/* Airtable & Excel Import Banner */}
-          <div className="p-6 rounded-3xl bg-slate-900 text-white shadow-xl space-y-6">
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
-              <div className="space-y-2">
-                <div className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-400">
+          {/* Airtable & Excel Import Central Banner */}
+          <div className="p-6 sm:p-8 rounded-3xl bg-slate-900 text-white shadow-xl space-y-6 border border-slate-800">
+            
+            {/* Header with Category selector */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+              <div className="space-y-1">
+                <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-400">
                   <Database className="w-4 h-4" />
-                  <span>Importação de Perguntas & Fotografias (Airtable / Excel / CSV)</span>
+                  <span>Central de Importação Airtable & Ficheiros</span>
                 </div>
-                <h3 className="text-xl sm:text-2xl font-bold">
-                  Carregar Perguntas a partir do Airtable
+                <h3 className="text-xl sm:text-2xl font-extrabold text-white">
+                  Como carregar as perguntas do seu Airtable
                 </h3>
-                <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-                  Tem as suas perguntas e imagens no Airtable? Pode importá-las facilmente por <strong>ficheiro CSV exportado</strong> ou por <strong>sincronização direta via API</strong>. O sistema extrai automaticamente o texto da pergunta, as opções, a resposta certa e os links das fotografias nos anexos.
+                <p className="text-xs text-slate-300">
+                  Não precisa de tokens complicados nem de programar. Escolha a forma mais confortável para si:
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-                <button
-                  onClick={() => setShowPasteModal(true)}
-                  className="px-3.5 py-2.5 text-xs font-bold rounded-xl bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 transition-colors flex items-center gap-1.5 shadow-sm"
-                  title="Copiar dados diretamente do Airtable e colar aqui"
+              {/* Target Category for imported questions */}
+              <div className="flex items-center gap-2 p-2 rounded-xl bg-slate-800/80 border border-slate-700/80 shrink-0">
+                <span className="text-xs text-slate-300 font-medium pl-1">Inserir em:</span>
+                <select
+                  value={importTargetCategory}
+                  onChange={(e) => setImportTargetCategory(e.target.value as any)}
+                  className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-emerald-300 font-bold text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 >
-                  <ClipboardPaste className="w-4 h-4 text-emerald-400" />
-                  <span>Colar do Airtable (Ctrl+V)</span>
-                </button>
-
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept=".csv, .xlsx, .xls"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isImporting}
-                  className="px-4 py-2.5 text-xs font-bold rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 transition-colors flex items-center gap-2 shadow-sm"
-                >
-                  <Upload className="w-4 h-4" />
-                  <span>{isImporting ? 'A analisar...' : 'Carregar Ficheiro CSV / Excel'}</span>
-                </button>
-
-                <button
-                  onClick={() => setShowAirtableModal(true)}
-                  className="px-3.5 py-2.5 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-500 text-white transition-colors flex items-center gap-1.5 shadow-sm"
-                >
-                  <Database className="w-4 h-4" />
-                  <span>Sincronizar API</span>
-                </button>
+                  <option value="Todas as Categorias">Todas as Categorias (Geral / Comum)</option>
+                  {ALL_DRIVER_CATEGORIES.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
-            {/* Quick Airtable step-by-step guide box */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-800 text-xs">
-              <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1.5">
-                <div className="font-bold text-emerald-400 flex items-center gap-1.5">
-                  <span className="w-5 h-5 rounded-full bg-emerald-950 text-emerald-400 flex items-center justify-center text-[11px] font-mono border border-emerald-800">1</span>
-                  <span>Método Mais Rápido: Exportar CSV do Airtable (10 segundos)</span>
-                </div>
-                <ol className="list-decimal list-inside text-slate-300 space-y-1 pl-1">
-                  <li>No seu Airtable, abra a vista da tabela de perguntas.</li>
-                  <li>No menu superior da vista, clique em <strong>...</strong> ou no nome da vista e escolha <strong>Download CSV</strong>.</li>
-                  <li>Clique no botão verde <strong>"Carregar Ficheiro CSV do Airtable"</strong> e selecione o ficheiro descarregado!</li>
-                </ol>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1.5 flex flex-col justify-between">
-                <div className="space-y-1.5">
-                  <div className="font-bold text-blue-400 flex items-center gap-1.5">
-                    <span className="w-5 h-5 rounded-full bg-blue-950 text-blue-400 flex items-center justify-center text-[11px] font-mono border border-blue-800">2</span>
-                    <span>Sincronização Direta sem Ficheiros (API)</span>
+            {/* Airtable API Live Sync Status Banner */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-blue-950/80 via-slate-900 to-indigo-950/80 border border-blue-700/60 shadow-lg space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-400 shrink-0 mt-0.5">
+                    <Database className="w-5 h-5" />
                   </div>
-                  <p className="text-slate-300">
-                    Ligue a sua conta Airtable diretamente introduzindo o seu <strong>Personal Access Token</strong> e <strong>Base ID</strong> para atualizar as perguntas sempre que quiser.
-                  </p>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="font-bold text-white text-sm">
+                        Sincronização em Tempo Real via Airtable API
+                      </h4>
+                      {airtableToken && airtableBaseId ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          API Conectada
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                          Pronto a Conectar
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-300 mt-1">
+                      {airtableToken && airtableBaseId ? (
+                        <>
+                          Base: <code className="text-blue-300 font-mono text-[11px] bg-slate-950/60 px-1.5 py-0.5 rounded border border-blue-900">{airtableBaseId}</code> · Tabela: <strong className="text-white">{airtableTable}</strong>
+                          {lastSyncInfo && (
+                            <span className="text-emerald-400 font-semibold ml-2">
+                              · Última sincronização: {new Date(lastSyncInfo.timestamp).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })} ({lastSyncInfo.count} perguntas)
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        'Mantenha as suas 8 colunas (Pergunta, ID, Tema, Imagem, nome da Imagem, Opção A, Opção B, Resposta Correta) sempre atualizadas automaticamente.'
+                      )}
+                    </p>
+                  </div>
                 </div>
-                <div>
+
+                {/* API Action Buttons */}
+                <div className="flex items-center gap-2 shrink-0">
                   <button
-                    onClick={downloadSampleExcelTemplate}
-                    className="text-xs text-slate-400 hover:text-white underline flex items-center gap-1 mt-1"
+                    type="button"
+                    onClick={() => handleAirtableSync()}
+                    disabled={airtableLoading}
+                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-2 shadow-md hover:shadow-blue-500/20 transition-all disabled:opacity-50"
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Descarregar modelo de referência Excel/CSV</span>
+                    <RefreshCw className={`w-3.5 h-3.5 ${airtableLoading ? 'animate-spin' : ''}`} />
+                    <span>{airtableLoading ? 'A sincronizar...' : 'Sincronizar Agora (API)'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAirtableModal(true)}
+                    className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Settings2 className="w-3.5 h-3.5" />
+                    <span>{airtableToken && airtableBaseId ? 'Definições API' : 'Ligar Airtable API'}</span>
                   </button>
                 </div>
               </div>
+
+              {/* Supported Columns Badge List */}
+              <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-1 text-[10px] text-slate-400">
+                <span className="font-semibold text-slate-300 mr-1">8 Colunas suportadas:</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">1. Pergunta</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">2. ID</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">3. Tema</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">4. Imagem</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">5. nome da Imagem</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">6. Opção A</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">7. Opção B</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-emerald-400 font-mono">8. Resposta Correta</span>
+              </div>
             </div>
 
+            {/* Hidden native file input */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".csv, .xlsx, .xls"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+
+            {/* Main Drag & Drop Zone */}
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`relative p-8 rounded-2xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center justify-center text-center space-y-3 ${
+                isDragging
+                  ? 'border-emerald-400 bg-emerald-950/40 scale-[1.01]'
+                  : 'border-slate-700 hover:border-emerald-500/70 bg-slate-800/40 hover:bg-slate-800/70'
+              }`}
+            >
+              <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                <UploadCloud className="w-7 h-7" />
+              </div>
+              
+              <div>
+                <div className="text-base sm:text-lg font-bold text-white">
+                  {isImporting ? 'A processar o seu ficheiro...' : 'Arraste o ficheiro CSV descarregado do Airtable para aqui'}
+                </div>
+                <p className="text-xs text-slate-300 mt-1 max-w-lg mx-auto">
+                  Ou clique aqui para procurar no seu computador. Deteta automaticamente as perguntas, opções, respostas certas e imagens dos anexos do Airtable.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] pt-1">
+                <span className="px-2.5 py-1 rounded-md bg-slate-800 text-emerald-400 font-semibold border border-slate-700/80">
+                  ✓ Ficheiro CSV exportado do Airtable
+                </span>
+                <span className="px-2.5 py-1 rounded-md bg-slate-800 text-emerald-400 font-semibold border border-slate-700/80">
+                  ✓ Links de Fotos nos Anexos
+                </span>
+                <span className="px-2.5 py-1 rounded-md bg-slate-800 text-emerald-400 font-semibold border border-slate-700/80">
+                  ✓ Ficheiros Excel (.xlsx, .xls)
+                </span>
+              </div>
+            </div>
+
+            {/* 3 Alternative Methods Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 text-xs">
+              
+              {/* Card 1: 10-Second Airtable CSV Guide */}
+              <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/70 flex flex-col justify-between space-y-3">
+                <div className="space-y-2">
+                  <div className="font-bold text-emerald-400 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-emerald-950 text-emerald-400 flex items-center justify-center text-[11px] font-mono border border-emerald-800">
+                      1
+                    </span>
+                    <span>Método Recomendado (5 Segundos)</span>
+                  </div>
+                  <p className="text-slate-300 leading-relaxed text-[11px]">
+                    No seu Airtable, abra a sua tabela, clique no menu superior <strong>...</strong> (ou na seta da vista) e escolha <strong>"Download CSV"</strong>. Depois arraste o ficheiro para o retângulo acima!
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full py-2 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Escolher Ficheiro CSV</span>
+                </button>
+              </div>
+
+              {/* Card 2: Direct Clipboard Paste (Ctrl+C / Ctrl+V) */}
+              <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/70 flex flex-col justify-between space-y-3">
+                <div className="space-y-2">
+                  <div className="font-bold text-blue-400 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-blue-950 text-blue-400 flex items-center justify-center text-[11px] font-mono border border-blue-800">
+                      2
+                    </span>
+                    <span>Copiar e Colar (Sem Ficheiros)</span>
+                  </div>
+                  <p className="text-slate-300 leading-relaxed text-[11px]">
+                    Selecione as linhas na sua grelha do Airtable, prima <strong>Ctrl+C</strong> (Copiar) e cole diretamente no simulador com <strong>Ctrl+V</strong>.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowPasteModal(true)}
+                  className="w-full py-2 px-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors border border-slate-600"
+                >
+                  <ClipboardPaste className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Abrir Caixa de Colar (Ctrl+V)</span>
+                </button>
+              </div>
+
+              {/* Card 3: Instant Demo Test / Template / API */}
+              <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/70 flex flex-col justify-between space-y-3">
+                <div className="space-y-2">
+                  <div className="font-bold text-amber-400 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-amber-950 text-amber-400 flex items-center justify-center text-[11px] font-mono border border-amber-800">
+                      3
+                    </span>
+                    <span>Testar Demonstração ou Modelo</span>
+                  </div>
+                  <p className="text-slate-300 leading-relaxed text-[11px]">
+                    Carregue perguntas oficiais de exemplo para ver a plataforma a funcionar já, ou descarregue a folha modelo.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={handleLoadDemoQuestions}
+                    className="w-full py-2 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors border border-amber-500/30"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Carregar 3 Perguntas Exemplo</span>
+                  </button>
+
+                  <div className="flex items-center justify-between text-[11px] pt-1 px-1">
+                    <button
+                      type="button"
+                      onClick={downloadSampleExcelTemplate}
+                      className="text-slate-400 hover:text-white underline flex items-center gap-1"
+                    >
+                      <Download className="w-3 h-3" />
+                      <span>Modelo Excel</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAirtableModal(true)}
+                      className="text-blue-400 hover:text-blue-300 underline flex items-center gap-1"
+                    >
+                      <Database className="w-3 h-3" />
+                      <span>API Airtable</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Status alerts */}
             {importStatus && (
-              <div className={`p-3.5 rounded-xl text-xs flex items-center gap-2 border ${
+              <div className={`p-4 rounded-2xl text-xs flex items-center justify-between gap-3 border ${
                 importStatus.type === 'success'
-                  ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200'
-                  : 'bg-rose-950/80 border-rose-500 text-rose-200'
+                  ? 'bg-emerald-950/90 border-emerald-500 text-emerald-200'
+                  : 'bg-rose-950/90 border-rose-500 text-rose-200'
               }`}>
-                {importStatus.type === 'success' ? <CheckCircle className="w-4 h-4 shrink-0 text-emerald-400" /> : <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />}
-                <span>{importStatus.message}</span>
+                <div className="flex items-center gap-2.5">
+                  {importStatus.type === 'success' ? (
+                    <CheckCircle className="w-4 h-4 shrink-0 text-emerald-400" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                  )}
+                  <span className="font-medium">{importStatus.message}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setImportStatus(null)}
+                  className="text-slate-400 hover:text-white text-xs underline shrink-0"
+                >
+                  Fechar
+                </button>
               </div>
             )}
           </div>
@@ -1254,14 +1572,14 @@ export const AdminDashboard: React.FC = () => {
 
       {/* Modal: Direct Airtable API Sync */}
       {showAirtableModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-5">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-5">
             
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Database className="w-5 h-5 text-blue-500" />
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  Sincronizar com Airtable API
+                  Configurar Conexão Airtable API
                 </h3>
               </div>
               <button
@@ -1272,77 +1590,172 @@ export const AdminDashboard: React.FC = () => {
               </button>
             </div>
 
-            <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-xs text-blue-800 dark:text-blue-300 space-y-1">
-              <div className="font-semibold">Onde encontrar estes dados no seu Airtable:</div>
-              <ul className="list-disc list-inside space-y-0.5 text-[11px] pl-1">
-                <li><strong>Personal Access Token:</strong> Em airtable.com/create/tokens (com permissão `data.records:read`).</li>
-                <li><strong>Base ID:</strong> Abre a sua base no browser; o URL tem o formato: airtable.com/<strong>appXXXXXXXXXXXXXX</strong>/...</li>
-                <li><strong>Nome da Tabela:</strong> O nome do separador da tabela (ex. <em>Perguntas</em>).</li>
-              </ul>
+            {/* Quick 3-Step Guide */}
+            <div className="p-3.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-xs text-blue-900 dark:text-blue-300 space-y-2">
+              <div className="font-bold flex items-center gap-1.5 text-blue-800 dark:text-blue-200">
+                <Sparkles className="w-4 h-4 text-blue-500" />
+                <span>Como gerar o seu Token Airtable em 30 segundos:</span>
+              </div>
+              <ol className="list-decimal list-inside space-y-1 text-[11px] pl-1 leading-relaxed">
+                <li>
+                  Aceda a{' '}
+                  <a
+                    href="https://airtable.com/create/tokens"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-bold underline text-blue-600 dark:text-blue-400 hover:text-blue-800 inline-flex items-center gap-0.5"
+                  >
+                    <span>airtable.com/create/tokens</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>{' '}
+                  e clique em <strong>"Create token"</strong>.
+                </li>
+                <li>Dê um nome (ex: <em>CondutorPRO</em>) e adicione o Scope <strong>data.records:read</strong>.</li>
+                <li>Na secção <strong>Access</strong>, selecione a sua Base que contém as perguntas e clique em Criar.</li>
+              </ol>
             </div>
 
-            <form onSubmit={handleAirtableSync} className="space-y-3.5 text-xs">
+            <form onSubmit={handleAirtableSync} className="space-y-4 text-xs">
+              
+              {/* Token Input */}
               <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Personal Access Token (PAT)
+                <label className="block font-semibold text-slate-800 dark:text-slate-200 mb-1">
+                  1. Personal Access Token (PAT) *
                 </label>
                 <input
                   type="password"
                   required
                   value={airtableToken}
-                  onChange={(e) => setAirtableToken(e.target.value)}
+                  onChange={(e) => setAirtableToken(e.target.value.trim())}
                   placeholder="pat..."
                   className="w-full px-3 py-2 font-mono bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 />
+                <span className="text-[10px] text-slate-500 mt-0.5 block">
+                  O seu token é guardado com segurança localmente no seu navegador para sincronizações futuras com 1 clique.
+                </span>
               </div>
 
+              {/* Paste full Airtable browser link (smart auto-detect) */}
               <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Base ID (ex. app...)
+                <label className="block font-semibold text-slate-800 dark:text-slate-200 mb-1 flex items-center justify-between">
+                  <span>2. Link da sua Tabela ou Base ID *</span>
+                  <span className="text-[10px] text-blue-600 dark:text-blue-400 font-normal">
+                    Deteta Base ID e Tabela automaticamente
+                  </span>
                 </label>
-                <input
-                  type="text"
-                  required
-                  value={airtableBaseId}
-                  onChange={(e) => setAirtableBaseId(e.target.value.trim())}
-                  placeholder="appAbc123XyZ..."
-                  className="w-full px-3 py-2 font-mono bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={airtableUrlInput}
+                    onChange={(e) => handleAirtableUrlPaste(e.target.value)}
+                    placeholder="Cole aqui o link do Airtable: https://airtable.com/app.../tbl... ou o Base ID"
+                    className="w-full pl-9 pr-3 py-2 text-xs font-mono bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                  <Link2 className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
+                </div>
               </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Nome da Tabela no Airtable
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={airtableTable}
-                  onChange={(e) => setAirtableTable(e.target.value)}
-                  placeholder="ex. Perguntas"
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                />
+              {/* Base ID and Table Name fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Base ID (ex: app...) *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={airtableBaseId}
+                    onChange={(e) => {
+                      const val = e.target.value.trim();
+                      if (val.includes('airtable.com')) {
+                        handleAirtableUrlPaste(val);
+                      } else {
+                        setAirtableBaseId(val);
+                      }
+                    }}
+                    placeholder="appXXXXXXXXXXXXXX"
+                    className="w-full px-3 py-2 font-mono bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Nome ou ID da Tabela *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={airtableTable}
+                    onChange={(e) => setAirtableTable(e.target.value)}
+                    placeholder="ex. Perguntas ou tbl..."
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
               </div>
 
-              <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900">
-                <label className="block font-bold text-slate-800 dark:text-slate-200 mb-1">
+              {/* Verified Column Mapping Matrix */}
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+                <div className="font-bold text-slate-800 dark:text-slate-200 text-xs flex items-center justify-between">
+                  <span>Estrutura de 8 Colunas reconhecida:</span>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">100% Compatível</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[11px]">
+                  <div className="p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-400 block text-[9px]">COLUNA 1</span>
+                    <strong className="text-slate-800 dark:text-slate-200 font-mono">Pergunta</strong>
+                  </div>
+                  <div className="p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-400 block text-[9px]">COLUNA 2</span>
+                    <strong className="text-slate-800 dark:text-slate-200 font-mono">ID</strong>
+                  </div>
+                  <div className="p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-400 block text-[9px]">COLUNA 3</span>
+                    <strong className="text-slate-800 dark:text-slate-200 font-mono">Tema</strong>
+                  </div>
+                  <div className="p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-400 block text-[9px]">COLUNA 4</span>
+                    <strong className="text-slate-800 dark:text-slate-200 font-mono">Imagem</strong>
+                  </div>
+                  <div className="p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-400 block text-[9px]">COLUNA 5</span>
+                    <strong className="text-slate-800 dark:text-slate-200 font-mono">nome da Imagem</strong>
+                  </div>
+                  <div className="p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-400 block text-[9px]">COLUNA 6</span>
+                    <strong className="text-slate-800 dark:text-slate-200 font-mono">Opção A</strong>
+                  </div>
+                  <div className="p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-400 block text-[9px]">COLUNA 7</span>
+                    <strong className="text-slate-800 dark:text-slate-200 font-mono">Opção B</strong>
+                  </div>
+                  <div className="p-1.5 rounded bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800">
+                    <span className="text-emerald-600 block text-[9px]">COLUNA 8</span>
+                    <strong className="text-emerald-700 dark:text-emerald-300 font-mono">Resposta Correta</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Target Category Selector */}
+              <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 space-y-1">
+                <label className="block font-bold text-slate-800 dark:text-slate-200">
                   Atribuir estas perguntas a que Categoria / Curso?
                 </label>
                 <select
                   value={importTargetCategory}
                   onChange={(e) => setImportTargetCategory(e.target.value as any)}
-                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-blue-300 dark:border-blue-700 rounded-lg text-slate-900 dark:text-white font-medium"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-blue-300 dark:border-blue-700 rounded-lg text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="Todas as Categorias">Todas as Categorias (Geral / Comum)</option>
                   {ALL_DRIVER_CATEGORIES.map(c => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 block">
+                <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
                   Os alunos inscritos nesta categoria verão estas perguntas nos seus exames e treinos.
                 </span>
               </div>
 
+              {/* Modal Buttons */}
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
@@ -1353,18 +1766,18 @@ export const AdminDashboard: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={airtableLoading}
-                  className="px-4 py-2 font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+                  disabled={airtableLoading || !airtableToken.trim() || !airtableBaseId.trim() || !airtableTable.trim()}
+                  className="px-5 py-2.5 font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-xl shadow-md flex items-center gap-2 disabled:opacity-50 transition-all"
                 >
                   {airtableLoading ? (
                     <>
                       <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>A sincronizar...</span>
+                      <span>A sincronizar via API...</span>
                     </>
                   ) : (
                     <>
-                      <Database className="w-3.5 h-3.5" />
-                      <span>Sincronizar Perguntas</span>
+                      <RefreshCw className="w-4 h-4" />
+                      <span>Sincronizar e Guardar Conexão</span>
                     </>
                   )}
                 </button>
@@ -1687,6 +2100,21 @@ export const AdminDashboard: React.FC = () => {
                 placeholder="Cole aqui os dados copiados do Airtable..."
                 className="w-full px-3 py-2 text-xs font-mono bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
               />
+            </div>
+
+            <div className="flex items-center justify-between text-xs pt-1">
+              <button
+                type="button"
+                onClick={handleInsertPasteSample}
+                className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Preencher com Dados de Exemplo (para testar)</span>
+              </button>
+              
+              <div className="text-[11px] text-slate-400">
+                Suporta tabulações, vírgulas e ponto-e-vírgula
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">

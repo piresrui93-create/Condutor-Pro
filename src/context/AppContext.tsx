@@ -459,14 +459,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const importQuestions = (newQuestions: Question[]): number => {
-    let addedCount = 0;
+    let affectedCount = 0;
     setQuestions(prev => {
-      const existingTextMap = new Set(prev.map(q => q.question.toLowerCase().trim()));
-      const toAdd = newQuestions.filter(q => !existingTextMap.has(q.question.toLowerCase().trim()));
-      addedCount = toAdd.length;
-      return [...toAdd, ...prev];
+      const updated = [...prev];
+      newQuestions.forEach(newQ => {
+        const normNewQuestion = newQ.question.toLowerCase().trim();
+        const existingIdx = updated.findIndex(
+          q => (newQ.id && q.id === newQ.id) || q.question.toLowerCase().trim() === normNewQuestion
+        );
+
+        if (existingIdx >= 0) {
+          // Update existing question with fresh fields from Airtable sync
+          updated[existingIdx] = {
+            ...updated[existingIdx],
+            ...newQ
+          };
+          affectedCount++;
+        } else {
+          // Insert new question
+          updated.unshift(newQ);
+          affectedCount++;
+        }
+      });
+      return updated;
     });
-    return addedCount;
+    return affectedCount;
   };
 
   const addQuestion = (data: Omit<Question, 'id'>): Question => {

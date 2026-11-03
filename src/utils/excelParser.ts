@@ -517,7 +517,31 @@ export function convertRowsToQuestions(
 }
 
 /**
+ * Parses any Airtable URL or string to extract Base ID (app...) and Table ID/Name (tbl...)
+ * e.g. "https://airtable.com/appM29K38dj/tbl9sKdjw83/viw..." -> { baseId: "appM29K38dj", tableIdOrName: "tbl9sKdjw83" }
+ */
+export function parseAirtableUrl(input: string): { baseId?: string; tableIdOrName?: string } {
+  if (!input) return {};
+  const trimmed = input.trim();
+  const baseMatch = trimmed.match(/app[a-zA-Z0-9]{10,}/i);
+  const tableMatch = trimmed.match(/tbl[a-zA-Z0-9]{10,}/i);
+  return {
+    baseId: baseMatch ? baseMatch[0] : undefined,
+    tableIdOrName: tableMatch ? tableMatch[0] : undefined
+  };
+}
+
+/**
  * Fetches questions directly from the Airtable REST API using a Personal Access Token
+ * Explicitly maps the 8 specified columns:
+ * 1. Pergunta (Question text)
+ * 2. ID (Unique stable question ID)
+ * 3. Tema (Topic / Category)
+ * 4. Imagem (Image attachment or URL)
+ * 5. nome da Imagem (Image caption / descriptive name)
+ * 6. Opção A (Choice A)
+ * 7. Opção B (Choice B)
+ * 8. Resposta Correta (Correct answer A or B)
  */
 export async function fetchQuestionsFromAirtableApi(
   personalAccessToken: string,
@@ -525,15 +549,37 @@ export async function fetchQuestionsFromAirtableApi(
   tableName: string,
   targetCategory: DriverCategory | 'Todas as Categorias' = 'Todas as Categorias'
 ): Promise<ExcelParseResult> {
-  const cleanToken = personalAccessToken.trim();
-  const cleanBase = baseId.trim();
-  const cleanTable = encodeURIComponent(tableName.trim());
+  const cleanToken = personalAccessToken.replace(/^Bearer\s+/i, '').trim();
+  
+  let cleanBase = baseId.trim();
+  let cleanTable = tableName.trim();
 
+  // If user pasted a full Airtable URL in baseId or tableName, auto-extract
+  const parsedBase = parseAirtableUrl(cleanBase);
+  if (parsedBase.baseId) {
+    cleanBase = parsedBase.baseId;
+    if (!cleanTable && parsedBase.tableIdOrName) {
+      cleanTable = parsedBase.tableIdOrName;
+    }
+  }
+
+  if (cleanTable.startsWith('http')) {
+    const parsedTable = parseAirtableUrl(cleanTable);
+    if (parsedTable.tableIdOrName) {
+      cleanTable = parsedTable.tableIdOrName;
+    }
+  }
+
+  if (!cleanBase.startsWith('app') && cleanBase.length < 10) {
+    throw new Error('Base ID inválido. No Airtable o Base ID começa com "app..." (ex: appAbc123XyZ).');
+  }
+
+  const encodedTable = encodeURIComponent(cleanTable);
   let allRecords: any[] = [];
   let offset: string | undefined = undefined;
 
   do {
-    const url: string = `https://api.airtable.com/v0/${cleanBase}/${cleanTable}?pageSize=100${offset ? `&offset=${encodeURIComponent(offset)}` : ''}`;
+    const url: string = `https://api.airtable.com/v0/${cleanBase}/${encodedTable}?pageSize=100${offset ? `&offset=${encodeURIComponent(offset)}` : ''}`;
 
     const response = await fetch(url, {
       headers: {
@@ -543,6 +589,13 @@ export async function fetchQuestionsFromAirtableApi(
 
     if (!response.ok) {
       const errorText = await response.text();
+      if (response.status === 401) {
+        throw new Error('Airtable API (401 - Não Autorizado): O Personal Access Token é inválido. Aceda a airtable.com/create/tokens para criar um token com permissão "data.records:read".');
+      } else if (response.status === 403) {
+        throw new Error('Airtable API (403 - Proibido): O seu token não tem acesso a esta base. Verifique se deu acesso à base correta e adicionou o scope "data.records:read" em airtable.com/create/tokens.');
+      } else if (response.status === 404) {
+        throw new Error(`Airtable API (404 - Não Encontrado): Base ID ("${cleanBase}") ou Tabela ("${cleanTable}") não encontrados. Verifique o Base ID e certifique-se de que o nome da tabela corresponde exatamente ao separador.`);
+      }
       throw new Error(`Erro na API Airtable (${response.status}): ${errorText}`);
     }
 
@@ -550,7 +603,7 @@ export async function fetchQuestionsFromAirtableApi(
     const records = data.records || [];
     allRecords = allRecords.concat(records);
     offset = data.offset;
-  } while (offset && allRecords.length < 2000);
+  } while (offset && allRecords.length < 2500);
 
   const questions: Question[] = [];
   const errors: string[] = [];
@@ -558,28 +611,136 @@ export async function fetchQuestionsFromAirtableApi(
   allRecords.forEach((record: any, index: number) => {
     const fields = record.fields || {};
     
-    // Normalize keys
+    // Normalize keys for case-insensitive / accent-insensitive matching
     const normalized: Record<string, any> = {};
     Object.keys(fields).forEach(key => {
       normalized[normalizeColumnKey(key)] = fields[key];
     });
 
-    const questionText = normalized['pergunta'] || normalized['questao'] || normalized['questoes'] || normalized['name'] || normalized['question'] || normalized['enunciado'] || normalized['texto'];
-    const optionA = normalized['opcaoa'] || normalized['optiona'] || normalized['a'] || normalized['respostaa'] || normalized['opcao1'];
-    const optionB = normalized['opcaob'] || normalized['optionb'] || normalized['b'] || normalized['respostab'] || normalized['opcao2'];
-    const optionC = normalized['opcaoc'] || normalized['optionc'] || normalized['c'] || normalized['respostac'] || normalized['opcao3'];
-    const rawCorrect = normalized['respostacerta'] || normalized['correctanswer'] || normalized['certa'] || normalized['correct'] || normalized['gabarito'] || normalized['resposta'];
+    // 1. Coluna 1: Pergunta
+    const questionText = 
+      fields['Pergunta'] || 
+      fields['pergunta'] || 
+      normalized['pergunta'] || 
+      normalized['questao'] || 
+      normalized['questoes'] || 
+      normalized['name'] || 
+      normalized['question'] || 
+      normalized['enunciado'] || 
+      normalized['texto'];
 
-    let imageUrl = cleanImageUrl(null, index);
-    const attachments = fields['Attachments'] || fields['Attachment'] || fields['Fotografia'] || fields['Imagem'] || fields['Foto'] || fields['Image'];
-    if (Array.isArray(attachments) && attachments.length > 0 && attachments[0].url) {
-      imageUrl = attachments[0].url;
+    // 2. Coluna 2: ID
+    const customIdRaw = 
+      fields['ID'] !== undefined && fields['ID'] !== null ? fields['ID'] :
+      fields['Id'] !== undefined && fields['Id'] !== null ? fields['Id'] :
+      fields['id'] !== undefined && fields['id'] !== null ? fields['id'] :
+      normalized['id'];
+    const customId = customIdRaw !== undefined && customIdRaw !== null && String(customIdRaw).trim() !== ''
+      ? String(customIdRaw).trim()
+      : null;
+    const questionId = customId ? `airtable-${customId}` : `airtable-${record.id}`;
+
+    // 3. Coluna 3: Tema
+    const rawCategory = 
+      fields['Tema'] || 
+      fields['tema'] || 
+      normalized['tema'] || 
+      normalized['categoria'] || 
+      normalized['category'] || 
+      'Sinais de Trânsito';
+    let category: QuestionCategory = String(rawCategory).trim() || 'Sinais de Trânsito';
+    const normCat = normalizeColumnKey(String(rawCategory));
+    const foundCat = VALID_CATEGORIES.find(c => 
+      normalizeColumnKey(c).includes(normCat) || normCat.includes(normalizeColumnKey(c))
+    );
+    if (foundCat) category = foundCat;
+
+    // 4. Coluna 4: Imagem (attachments or string URL)
+    let imageUrl = '';
+    const attachments = 
+      fields['Imagem'] || 
+      fields['imagem'] || 
+      normalized['imagem'] || 
+      fields['Fotografia'] || 
+      fields['Foto'] || 
+      fields['Attachments'] || 
+      fields['Attachment'] || 
+      fields['Image'];
+
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      const first = attachments[0];
+      imageUrl = first.thumbnails?.large?.url || first.thumbnails?.full?.url || first.url || '';
+    } else if (attachments && typeof attachments === 'object' && attachments.url) {
+      imageUrl = attachments.thumbnails?.large?.url || attachments.url;
     } else if (typeof attachments === 'string') {
       imageUrl = cleanImageUrl(attachments, index);
     }
+    if (!imageUrl) {
+      imageUrl = cleanImageUrl(null, index);
+    }
+
+    // 5. Coluna 5: nome da Imagem (caption)
+    const rawImageName = 
+      fields['nome da Imagem'] || 
+      fields['Nome da Imagem'] || 
+      fields['nome da imagem'] || 
+      normalized['nomedaimagem'] || 
+      fields['Legenda'] || 
+      fields['legenda'] || 
+      normalized['legenda'];
+    const imageCaption = rawImageName 
+      ? String(rawImageName).trim() 
+      : 'Cenário oficial da questão rodoviária.';
+
+    // 6. Coluna 6: Opção A
+    const optionA = 
+      fields['Opção A'] || 
+      fields['Opcao A'] || 
+      fields['opcao a'] || 
+      normalized['opcaoa'] || 
+      normalized['optiona'] || 
+      normalized['a'] || 
+      normalized['respostaa'] || 
+      normalized['opcao1'];
+
+    // 7. Coluna 7: Opção B
+    const optionB = 
+      fields['Opção B'] || 
+      fields['Opcao B'] || 
+      fields['opcao b'] || 
+      normalized['opcaob'] || 
+      normalized['optionb'] || 
+      normalized['b'] || 
+      normalized['respostab'] || 
+      normalized['opcao2'];
+
+    // Optional Opção C (if present in table)
+    const optionC = 
+      fields['Opção C'] || 
+      fields['Opcao C'] || 
+      normalized['opcaoc'] || 
+      normalized['optionc'] || 
+      normalized['c'] || 
+      normalized['respostac'] || 
+      normalized['opcao3'];
+
+    // 8. Coluna 8: Resposta Correta
+    const rawCorrect = 
+      fields['Resposta Correta'] || 
+      fields['resposta correta'] || 
+      fields['Resposta Certa'] || 
+      fields['resposta certa'] || 
+      normalized['respostacorreta'] || 
+      normalized['respostacerta'] || 
+      normalized['opcaocorreta'] || 
+      normalized['correctanswer'] || 
+      normalized['certa'] || 
+      normalized['correta'] || 
+      normalized['gabarito'] || 
+      normalized['resposta'];
 
     if (!questionText || !optionA || !optionB) {
-      errors.push(`Registo ${record.id}: campos obrigatórios em falta (pergunta e opções A/B).`);
+      errors.push(`Registo ${record.id}: Pergunta ou Opções A/B vazias.`);
       return;
     }
 
@@ -598,45 +759,50 @@ export async function fetchQuestionsFromAirtableApi(
       const clean = String(rawCorrect).trim().toUpperCase();
       const lowerClean = clean.toLowerCase();
 
-      if (clean === 'A' || clean === '1' || clean.startsWith('A)') || clean.startsWith('A -') || clean.startsWith('OPÇÃO A') || clean.startsWith('OPCAO A')) {
+      if (
+        clean === 'A' || clean === '1' ||
+        clean.startsWith('A)') || clean.startsWith('A -') || clean.startsWith('A.') ||
+        clean.startsWith('OPÇÃO A') || clean.startsWith('OPCAO A') ||
+        lowerClean === strOptA
+      ) {
         correctAnswer = 0;
-      } else if (clean === 'B' || clean === '2' || clean.startsWith('B)') || clean.startsWith('B -') || clean.startsWith('OPÇÃO B') || clean.startsWith('OPCAO B')) {
+      } else if (
+        clean === 'B' || clean === '2' ||
+        clean.startsWith('B)') || clean.startsWith('B -') || clean.startsWith('B.') ||
+        clean.startsWith('OPÇÃO B') || clean.startsWith('OPCAO B') ||
+        lowerClean === strOptB
+      ) {
         correctAnswer = 1;
-      } else if (clean === 'C' || clean === '3' || clean.startsWith('C)') || clean.startsWith('C -') || clean.startsWith('OPÇÃO C') || clean.startsWith('OPCAO C')) {
-        correctAnswer = 2;
-      } else if (lowerClean === strOptA) {
-        correctAnswer = 0;
-      } else if (lowerClean === strOptB) {
-        correctAnswer = 1;
-      } else if (strOptC && lowerClean === strOptC) {
+      } else if (
+        clean === 'C' || clean === '3' ||
+        clean.startsWith('C)') || clean.startsWith('C -') || clean.startsWith('C.') ||
+        clean.startsWith('OPÇÃO C') || clean.startsWith('OPCAO C') ||
+        (strOptC && lowerClean === strOptC)
+      ) {
         correctAnswer = 2;
       }
     }
 
     const options = [String(optionA).trim(), String(optionB).trim()];
-    if (optionC && String(optionC).trim()) options.push(String(optionC).trim());
-
-    const rawCategory = normalized['tema'] || normalized['categoria'] || normalized['category'] || 'Sinais de Trânsito';
-    let category: QuestionCategory = 'Sinais de Trânsito';
-    const normCat = normalizeColumnKey(String(rawCategory));
-    const foundCat = VALID_CATEGORIES.find(c => normalizeColumnKey(c).includes(normCat) || normCat.includes(normalizeColumnKey(c)));
-    if (foundCat) category = foundCat;
+    if (optionC && String(optionC).trim()) {
+      options.push(String(optionC).trim());
+    }
 
     const difficulty = String(normalized['dificuldade'] || 'medium').toLowerCase().includes('dificil') ? 'hard' : 'medium';
 
     questions.push({
-      id: `airtable-${record.id || index}-${Date.now()}`,
+      id: questionId,
       question: String(questionText).trim(),
       imageUrl,
-      imageCaption: 'Cenário sincronizado do Airtable.',
+      imageCaption,
       options,
       correctAnswer,
       category,
       targetCategory,
-      explanation: String(normalized['explicacao'] || normalized['explanation'] || 'Consulte o Código da Estrada português.').trim(),
-      lawArticle: String(normalized['artigo'] || normalized['article'] || 'Código da Estrada').trim(),
+      explanation: String(fields['Explicação'] || normalized['explicacao'] || normalized['explanation'] || 'Consulte o Código da Estrada português e o tema correspondente.').trim(),
+      lawArticle: String(fields['Artigo'] || normalized['artigo'] || normalized['article'] || 'Código da Estrada').trim(),
       difficulty,
-      failureRate: difficulty === 'hard' ? 55 : 30
+      failureRate: difficulty === 'hard' ? 52 : 28
     });
   });
 
