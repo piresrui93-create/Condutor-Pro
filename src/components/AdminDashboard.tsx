@@ -56,23 +56,36 @@ export const AdminDashboard: React.FC = () => {
     users, 
     questions, 
     categoryConfigs,
+    categoryAirtableConfigs,
+    airtableToken,
+    setAirtableToken,
+    isSyncingAirtable,
+    lastAutoSyncTime,
+    autoSyncStatus,
     updateCategoryConfig,
     resetCategoryConfigs,
+    updateCategoryAirtableConfig,
+    syncCategoryFromAirtable,
+    syncAllCategoriesFromAirtable,
     importQuestions, 
     addQuestion, 
     deleteQuestion, 
+    clearAllQuestions,
+    resetToZero,
     refundInvoice,
     updateUserSubscription 
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'questions' | 'categories' | 'billing'>('questions');
+  const [activeTab, setActiveTab] = useState<'questions' | 'airtable_categories' | 'categories' | 'billing'>('questions');
+  const [syncingCategoryKey, setSyncingCategoryKey] = useState<DriverCategory | null>(null);
+  const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   
   // Excel and Airtable import state
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importStatus, setImportStatus] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [showAirtableModal, setShowAirtableModal] = useState(false);
-  const [airtableToken, setAirtableToken] = useState(() => localStorage.getItem('condutorpro_airtable_token') || '');
   const [airtableBaseId, setAirtableBaseId] = useState(() => localStorage.getItem('condutorpro_airtable_base_id') || 'appUE8v1QiipoQRKy');
   const [airtableTable, setAirtableTable] = useState(() => localStorage.getItem('condutorpro_airtable_table') || 'tblI3NbgzjCKlruXc');
   const [airtableUrlInput, setAirtableUrlInput] = useState('https://airtable.com/appUE8v1QiipoQRKy/tblI3NbgzjCKlruXc');
@@ -91,11 +104,119 @@ export const AdminDashboard: React.FC = () => {
     return null;
   });
 
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
+
+  const handleTestConnection = async () => {
+    setIsTesting(true);
+    setTestResult(null);
+    try {
+      const cleanToken = airtableToken.replace(/^Bearer\s+/i, '').replace(/[\r\n\t"']/g, '').trim();
+      const cleanBase = airtableBaseId.replace(/[\r\n\t"']/g, '').trim();
+      const cleanTable = airtableTable.replace(/[\r\n\t"']/g, '').trim();
+
+      if (!cleanToken) {
+        setTestResult({ success: false, message: 'Insira o token para testar.' });
+        return;
+      }
+
+      const res = await fetch(`https://api.airtable.com/v0/${cleanBase}/${encodeURIComponent(cleanTable)}?maxRecords=1`, {
+        headers: {
+          Authorization: `Bearer ${cleanToken}`
+        }
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setTestResult({
+          success: true,
+          message: `Conexão 100% aprovada! O Airtable respondeu com sucesso (${data.records?.length || 0} registo(s) detetados na base). Pode sincronizar agora!`
+        });
+      } else {
+        const errText = await res.text();
+        let parsedMsg = errText;
+        try {
+          const parsed = JSON.parse(errText);
+          parsedMsg = parsed.error?.message || parsed.error?.type || errText;
+        } catch {}
+
+        let guidance = '';
+        if (cleanToken.startsWith('tok')) {
+          guidance = ' (Atenção: inseriu o Token ID "tok...". O token real começa por "pat...").';
+        } else if (cleanToken === 'condutorpro') {
+          guidance = ' (Atenção: inseriu o NOME do token "condutorpro", mas precisa do código secreto que começa por "pat...").';
+        }
+
+        setTestResult({
+          success: false,
+          message: `Airtable devolveu erro ${res.status}: "${parsedMsg}"${guidance}`
+        });
+      }
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: err?.message || 'Falha de rede ao contactar a API do Airtable.'
+      });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
   const handleCopyAirtableData = () => {
     const tsv = getAirtableTsvForClipboard();
     navigator.clipboard.writeText(tsv);
     setCopyAirtableSuccess(true);
     setTimeout(() => setCopyAirtableSuccess(false), 3500);
+  };
+
+  const handleSyncSingleCategory = async (cat: DriverCategory) => {
+    setSyncingCategoryKey(cat);
+    setImportStatus(null);
+    try {
+      const res = await syncCategoryFromAirtable(cat);
+      if (res.success) {
+        setImportStatus({
+          type: 'success',
+          message: res.message
+        });
+      } else {
+        setImportStatus({
+          type: 'error',
+          message: res.message
+        });
+      }
+    } finally {
+      setSyncingCategoryKey(null);
+    }
+  };
+
+  const handleSyncAllCategories = async () => {
+    setImportStatus(null);
+    const res = await syncAllCategoriesFromAirtable();
+    if (res.success) {
+      setImportStatus({
+        type: 'success',
+        message: res.message
+      });
+    } else {
+      setImportStatus({
+        type: 'error',
+        message: res.message
+      });
+    }
+  };
+
+  const handleConfirmReset = () => {
+    setIsResetting(true);
+    resetToZero();
+    setTimeout(() => {
+      setIsResetting(false);
+      setShowResetConfirmModal(false);
+      setImportStatus({
+        type: 'success',
+        message: 'A aplicação foi limpa com sucesso! 0 perguntas de exemplo, 0 alunos de exemplo e 0 faturas. Está completamente do zero.'
+      });
+    }, 400);
   };
 
   // Column Mapping & Clipboard Paste Modal state
@@ -457,42 +578,65 @@ export const AdminDashboard: React.FC = () => {
           </p>
         </div>
 
-        {/* Tab switch */}
-        <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
-          <button
-            onClick={() => setActiveTab('questions')}
-            className={`px-3 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
-              activeTab === 'questions'
-                ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-            <span>Banco de Perguntas ({questions.length})</span>
-          </button>
+        {/* Tab switch & Actions */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
+            <button
+              onClick={() => setActiveTab('questions')}
+              className={`px-3 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                activeTab === 'questions'
+                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              <span>Banco de Perguntas ({questions.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('airtable_categories')}
+              className={`px-3 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                activeTab === 'airtable_categories'
+                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Database className="w-4 h-4 text-blue-500" />
+              <span>Bases Airtable por Categoria</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('categories')}
+              className={`px-3 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                activeTab === 'categories'
+                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Settings2 className="w-4 h-4 text-emerald-600" />
+              <span>Condições de Aprovação</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('billing')}
+              className={`px-3 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                activeTab === 'billing'
+                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <DollarSign className="w-4 h-4 text-emerald-600" />
+              <span>Faturação (Stripe)</span>
+            </button>
+          </div>
 
           <button
-            onClick={() => setActiveTab('categories')}
-            className={`px-3 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
-              activeTab === 'categories'
-                ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
+            onClick={() => setShowResetConfirmModal(true)}
+            className="px-3 py-2 text-xs font-bold rounded-xl text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors flex items-center gap-1.5"
+            title="Limpar todos os dados de teste e começar completamente do zero"
           >
-            <Settings2 className="w-4 h-4 text-emerald-600" />
-            <span>Condições por Categoria</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('billing')}
-            className={`px-3 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
-              activeTab === 'billing'
-                ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <DollarSign className="w-4 h-4 text-emerald-600" />
-            <span>Faturação (Stripe)</span>
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Repor a Zero</span>
           </button>
         </div>
       </div>
@@ -1342,6 +1486,271 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
+      {/* TAB: Airtable Bases per Category */}
+      {activeTab === 'airtable_categories' && (
+        <div className="space-y-6 animate-in fade-in duration-150">
+          
+          {/* Header Banner */}
+          <div className="p-6 rounded-3xl bg-slate-900 text-white border border-slate-800 shadow-xl flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30">
+                  <Database className="w-5 h-5" />
+                </span>
+                <span className="text-xs font-bold uppercase tracking-wider text-blue-400">
+                  Integração Airtable Multi-Categoria
+                </span>
+              </div>
+              <h2 className="text-2xl font-black text-white">
+                Bases de Perguntas Airtable por Categoria
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
+                Cada categoria oficial (Cat. B, Cat. A, Instrutores, TVDE, etc.) possui a sua própria tabela no Airtable.
+                As questões atualizadas no Airtable são sincronizadas <strong>automaticamente a cada 3 minutos</strong> sem necessidade de recarregar a página.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
+              <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700 text-xs space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-emerald-400">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>Auto-Sync Ativo (3 min)</span>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Última sincronização: <strong>{lastAutoSyncTime || 'Acabou de iniciar'}</strong>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSyncAllCategories}
+                disabled={isSyncingAirtable || !airtableToken}
+                className="px-4 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-2xl font-bold text-xs shadow-lg flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                <RefreshCw className={`w-4 h-4 ${isSyncingAirtable ? 'animate-spin' : ''}`} />
+                <span>{isSyncingAirtable ? 'A Sincronizar Tudo...' : 'Sincronizar Todas as Categorias'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Token Card with guidance on user's screenshot */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <span>1. Chave Secreta de API (Personal Access Token)</span>
+                  {airtableToken ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                      Token Definido
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                      Token Não Inserido
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Esta chave privada autentica o simulador com a sua conta Airtable para ler as perguntas e opções em tempo real.
+                </p>
+              </div>
+
+              <a
+                href="https://airtable.com/create/tokens"
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 flex items-center gap-1.5 transition-colors shrink-0"
+              >
+                <span>Abrir Gestor de Tokens Airtable</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </div>
+
+            {/* Crucial Diagnostic Callout on user's image */}
+            <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 text-xs text-amber-900 dark:text-amber-200 space-y-2">
+              <div className="font-bold flex items-center gap-2 text-amber-800 dark:text-amber-300">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+                <span>Instrução fundamental sobre o ecrã do Airtable (Evitar o Erro 401):</span>
+              </div>
+              <p className="text-[11px] leading-relaxed">
+                Na janela onde atribuiu o nome <strong>"condutorpro"</strong> e a permissão <strong>data.records:read</strong> (exatamente como na imagem que enviou), <strong>tem de rolar até ao fundo da página e clicar no botão azul "Create token"</strong>.
+              </p>
+              <p className="text-[11px] leading-relaxed">
+                Assim que clica nesse botão azul, o Airtable abre uma nova janela com a sua <strong>chave secreta que começa por "pat..."</strong> (ex: <code className="bg-amber-100 dark:bg-amber-900/80 px-1.5 py-0.5 rounded font-mono font-bold">patXXXXXXXXXX.YYYYYYYYYYYY</code>). É essa chave que deve colar no campo abaixo!
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
+              <div className="lg:col-span-9 space-y-1">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Personal Access Token (começa por pat...)
+                </label>
+                <input
+                  type="text"
+                  value={airtableToken}
+                  onChange={(e) => setAirtableToken(e.target.value)}
+                  placeholder="pat..."
+                  className="w-full px-3.5 py-2.5 font-mono text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="lg:col-span-3">
+                <button
+                  type="button"
+                  onClick={handleTestConnection}
+                  disabled={isTesting || !airtableToken}
+                  className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-xs font-bold rounded-xl shadow-xs disabled:opacity-40 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isTesting ? 'animate-spin' : ''}`} />
+                  <span>{isTesting ? 'A Testar Chave...' : 'Testar Chave (Diagnóstico)'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Test result output */}
+            {testResult && (
+              <div className={`p-3.5 rounded-xl text-xs border font-medium ${
+                testResult.success
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                  : 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+              }`}>
+                {testResult.message}
+              </div>
+            )}
+          </div>
+
+          {/* 6 Category Configuration Cards */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  2. Tabelas do Airtable Associadas a Cada Categoria
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Configure o Base ID e a Tabela para cada uma das 6 categorias oficiais do IMT / cursos profissionais.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {ALL_DRIVER_CATEGORIES.map(catKey => {
+                const cfg = categoryAirtableConfigs[catKey] || {
+                  category: catKey,
+                  baseId: 'appUE8v1QiipoQRKy',
+                  tableIdOrName: 'tblI3NbgzjCKlruXc',
+                  autoSync: true
+                };
+                const catExamCfg = categoryConfigs[catKey];
+                const catQuestions = questions.filter(q => q.targetCategory === catKey);
+                const isCatSyncing = syncingCategoryKey === catKey;
+
+                return (
+                  <div
+                    key={catKey}
+                    className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:border-blue-500/40 transition-all flex flex-col justify-between space-y-4"
+                  >
+                    <div className="space-y-3">
+                      
+                      {/* Header with Title & Badge */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 block">
+                            {catExamCfg?.shortName || catKey}
+                          </span>
+                          <h4 className="text-sm font-extrabold text-slate-900 dark:text-white leading-snug">
+                            {catKey}
+                          </h4>
+                        </div>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                          {catQuestions.length} perguntas
+                        </span>
+                      </div>
+
+                      {/* Inputs: Base ID & Table */}
+                      <div className="space-y-2 text-xs">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                            Base ID (ex: app...)
+                          </label>
+                          <input
+                            type="text"
+                            value={cfg.baseId}
+                            onChange={(e) => updateCategoryAirtableConfig(catKey, { baseId: e.target.value.trim() })}
+                            placeholder="appUE8v1QiipoQRKy"
+                            className="w-full px-3 py-1.5 font-mono text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                            Nome ou ID da Tabela (ex: tbl... ou Perguntas)
+                          </label>
+                          <input
+                            type="text"
+                            value={cfg.tableIdOrName}
+                            onChange={(e) => updateCategoryAirtableConfig(catKey, { tableIdOrName: e.target.value.trim() })}
+                            placeholder="tblI3NbgzjCKlruXc"
+                            className="w-full px-3 py-1.5 font-mono text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+
+                        {/* Auto-sync checkbox */}
+                        <label className="flex items-center gap-2 pt-1 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={cfg.autoSync}
+                            onChange={(e) => updateCategoryAirtableConfig(catKey, { autoSync: e.target.checked })}
+                            className="rounded text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                          />
+                          <span className="text-[11px] text-slate-600 dark:text-slate-400">
+                            Auto-Sync em segundo plano
+                          </span>
+                        </label>
+                      </div>
+
+                      {/* Meta sync info */}
+                      <div className="text-[10px] text-slate-400 border-t border-slate-100 dark:border-slate-800 pt-2 flex items-center justify-between">
+                        <span>Último sync:</span>
+                        <span className="font-semibold text-slate-600 dark:text-slate-300">
+                          {cfg.lastSyncedAt ? new Date(cfg.lastSyncedAt).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Nunca'}
+                        </span>
+                      </div>
+
+                    </div>
+
+                    {/* Actions */}
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSyncSingleCategory(catKey)}
+                        disabled={isCatSyncing || !airtableToken}
+                        className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isCatSyncing ? 'animate-spin' : ''}`} />
+                        <span>{isCatSyncing ? 'A Sincronizar...' : 'Sincronizar Agora'}</span>
+                      </button>
+
+                      {cfg.baseId && cfg.tableIdOrName && (
+                        <a
+                          href={`https://airtable.com/${cfg.baseId}/${cfg.tableIdOrName}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Abrir tabela no Airtable"
+                          className="p-2 text-slate-500 hover:text-slate-800 dark:hover:text-white rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
+                      )}
+                    </div>
+
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+        </div>
+      )}
+
       {/* Modal: Add Question Manual */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-150">
@@ -1816,32 +2225,69 @@ export const AdminDashboard: React.FC = () => {
                 </span>
               </div>
 
+              {/* Test Result Message */}
+              {testResult && (
+                <div className={`p-3 rounded-xl border text-xs font-medium flex items-start gap-2 ${
+                  testResult.success
+                    ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                    : 'bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                }`}>
+                  {testResult.success ? (
+                    <CheckCircle className="w-4 h-4 shrink-0 text-emerald-600 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
+                  )}
+                  <div>{testResult.message}</div>
+                </div>
+              )}
+
               {/* Modal Buttons */}
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setShowAirtableModal(false)}
-                  className="px-4 py-2 font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+                  onClick={handleTestConnection}
+                  disabled={isTesting || !airtableToken.trim()}
+                  className="px-3.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={airtableLoading || !airtableToken.trim() || !airtableBaseId.trim() || !airtableTable.trim()}
-                  className="px-5 py-2.5 font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-xl shadow-md flex items-center gap-2 disabled:opacity-50 transition-all"
-                >
-                  {airtableLoading ? (
+                  {isTesting ? (
                     <>
-                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>A sincronizar via API...</span>
+                      <div className="w-3 h-3 border-2 border-slate-500 border-t-transparent rounded-full animate-spin" />
+                      <span>A testar token...</span>
                     </>
                   ) : (
                     <>
-                      <RefreshCw className="w-4 h-4" />
-                      <span>Sincronizar e Guardar Conexão</span>
+                      <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+                      <span>Testar Chave (Diagnóstico Imediato)</span>
                     </>
                   )}
                 </button>
+
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAirtableModal(false)}
+                    className="px-4 py-2 font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={airtableLoading || !airtableToken.trim() || !airtableBaseId.trim() || !airtableTable.trim()}
+                    className="px-5 py-2.5 font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-xl shadow-md flex items-center gap-2 disabled:opacity-50 transition-all"
+                  >
+                    {airtableLoading ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>A sincronizar via API...</span>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-4 h-4" />
+                        <span>Sincronizar e Guardar Conexão</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </form>
 
@@ -2197,6 +2643,49 @@ export const AdminDashboard: React.FC = () => {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirm Reset to Zero */}
+      {showResetConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-5">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900 flex items-center justify-center text-rose-600 dark:text-rose-400">
+              <RotateCcw className="w-6 h-6" />
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                Limpar Todos os Dados e Começar do Zero?
+              </h3>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                Esta ação irá apagar todas as perguntas em cache/memória, remover registos de alunos de teste e faturas de exemplo, mantendo apenas a sua conta de Administrador.
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                A aplicação ficará com <strong>0 perguntas</strong>, pronta para receber exclusivamente os seus dados reais através da sincronização com o Airtable.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowResetConfirmModal(false)}
+                disabled={isResetting}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReset}
+                disabled={isResetting}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{isResetting ? 'A Limpar...' : 'Sim, Começar do Zero'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

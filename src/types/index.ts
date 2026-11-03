@@ -41,6 +41,15 @@ export interface CategoryExamConfig {
   badgeColor?: string;
 }
 
+export interface CategoryAirtableConfig {
+  category: DriverCategory;
+  baseId: string;
+  tableIdOrName: string;
+  autoSync: boolean;
+  lastSyncedAt?: string;
+  questionCount?: number;
+}
+
 export interface Question {
   id: string;
   question: string;

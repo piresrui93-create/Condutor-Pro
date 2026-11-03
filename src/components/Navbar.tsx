@@ -83,17 +83,19 @@ export const Navbar: React.FC<NavbarProps> = ({
             O Meu Desempenho
           </button>
 
-          <button
-            onClick={() => onNavigate('admin')}
-            className={`whitespace-nowrap shrink-0 transition-colors py-1 flex items-center gap-1.5 hover:text-slate-900 dark:hover:text-white ${
-              currentView === 'admin' || currentView === 'billing'
-                ? 'text-slate-900 dark:text-white font-semibold border-b-2 border-emerald-500'
-                : ''
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span>Carregar Perguntas (Airtable) & Admin</span>
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => onNavigate('admin')}
+              className={`whitespace-nowrap shrink-0 transition-colors py-1 flex items-center gap-1.5 hover:text-slate-900 dark:hover:text-white ${
+                currentView === 'admin' || currentView === 'billing'
+                  ? 'text-slate-900 dark:text-white font-semibold border-b-2 border-emerald-500'
+                  : ''
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <span>Administração & Airtable</span>
+            </button>
+          )}
         </nav>
 
         {/* Zone 3: 1 Primary Action & Context Controls */}

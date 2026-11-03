@@ -11,6 +11,7 @@ import {
   XCircle, 
   AlertTriangle, 
   HelpCircle,
+  AlertCircle,
   RotateCcw,
   BarChart2,
   BookOpen,
@@ -194,6 +195,36 @@ export const ExamEngine: React.FC<ExamEngineProps> = ({
     const remainingSecs = secs % 60;
     return `${String(mins).padStart(2, '0')}:${String(remainingSecs).padStart(2, '0')}`;
   };
+
+  // If there are no questions available for this category/mode
+  if (totalQuestions === 0) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-16 text-center space-y-6 animate-in fade-in duration-200">
+        <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center border border-amber-500/20 shadow-xs">
+          <AlertCircle className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">
+            Sem Perguntas Disponíveis
+          </h2>
+          <p className="text-sm text-slate-600 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
+            Ainda não existem perguntas carregadas para <strong className="text-slate-900 dark:text-white">{studentCat}</strong>.
+            {currentUser?.role === 'admin' 
+              ? ' Como administrador, aceda à secção de Administração para sincronizar a tabela do Airtable correspondente.' 
+              : ' As questões estão a ser preparadas pela administração da escola. Por favor volte a tentar mais tarde.'}
+          </p>
+        </div>
+        <div className="flex items-center justify-center gap-3 pt-2">
+          <button
+            onClick={onExit}
+            className="px-6 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold hover:opacity-90 shadow-sm transition-all"
+          >
+            Voltar ao Início
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // If exam finished and not in question-by-question review, render result scorecard
   if (isFinished && resultAttempt && !reviewMode) {

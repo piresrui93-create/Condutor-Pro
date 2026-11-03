@@ -9,9 +9,10 @@ import {
   SubscriptionStatus,
   DriverCategory,
   CategoryExamConfig,
+  CategoryAirtableConfig,
   ALL_DRIVER_CATEGORIES
 } from '../types';
-import { INITIAL_QUESTIONS } from '../data/initialQuestions';
+import { fetchQuestionsFromAirtableApi } from '../utils/excelParser';
 
 export const DEFAULT_CATEGORY_CONFIGS: Record<DriverCategory, CategoryExamConfig> = {
   'Categoria B': {
@@ -76,15 +77,63 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<DriverCategory, CategoryExamConfig
   }
 };
 
-interface AppContextType {
+export const DEFAULT_CATEGORY_AIRTABLE_CONFIGS: Record<DriverCategory, CategoryAirtableConfig> = {
+  'Categoria B': {
+    category: 'Categoria B',
+    baseId: 'appUE8v1QiipoQRKy',
+    tableIdOrName: 'tblI3NbgzjCKlruXc',
+    autoSync: true
+  },
+  'Categoria A1': {
+    category: 'Categoria A1',
+    baseId: 'appUE8v1QiipoQRKy',
+    tableIdOrName: 'tblI3NbgzjCKlruXc',
+    autoSync: true
+  },
+  'Categoria A': {
+    category: 'Categoria A',
+    baseId: 'appUE8v1QiipoQRKy',
+    tableIdOrName: 'tblI3NbgzjCKlruXc',
+    autoSync: true
+  },
+  'Curso Instrutores de Condução Automóvel': {
+    category: 'Curso Instrutores de Condução Automóvel',
+    baseId: 'appUE8v1QiipoQRKy',
+    tableIdOrName: 'tblI3NbgzjCKlruXc',
+    autoSync: true
+  },
+  'Curso de Diretor de Escola de Condução': {
+    category: 'Curso de Diretor de Escola de Condução',
+    baseId: 'appUE8v1QiipoQRKy',
+    tableIdOrName: 'tblI3NbgzjCKlruXc',
+    autoSync: true
+  },
+  'Curso TVDE': {
+    category: 'Curso TVDE',
+    baseId: 'appUE8v1QiipoQRKy',
+    tableIdOrName: 'tblI3NbgzjCKlruXc',
+    autoSync: true
+  }
+};
+
+export interface AppContextType {
   currentUser: User | null;
   users: User[];
   questions: Question[];
   attempts: ExamAttempt[];
   invoices: BillingInvoice[];
   categoryConfigs: Record<DriverCategory, CategoryExamConfig>;
+  categoryAirtableConfigs: Record<DriverCategory, CategoryAirtableConfig>;
+  airtableToken: string;
+  isSyncingAirtable: boolean;
+  lastAutoSyncTime: string | null;
+  autoSyncStatus: { success: boolean; message: string; timestamp: string } | null;
+  setAirtableToken: (token: string) => void;
   updateCategoryConfig: (config: CategoryExamConfig) => void;
   resetCategoryConfigs: () => void;
+  updateCategoryAirtableConfig: (category: DriverCategory, patch: Partial<CategoryAirtableConfig>) => void;
+  syncCategoryFromAirtable: (category: DriverCategory, tokenOverride?: string) => Promise<{ success: boolean; count: number; message: string }>;
+  syncAllCategoriesFromAirtable: (tokenOverride?: string) => Promise<{ success: boolean; results: Record<string, number>; totalAdded: number; message: string }>;
   updateUserCategory: (category: DriverCategory, userId?: string) => void;
   login: (email: string, role?: 'student' | 'admin') => Promise<boolean>;
   loginWithGoogle: (preferredCategory?: DriverCategory) => Promise<boolean>;
@@ -97,6 +146,8 @@ interface AppContextType {
   addQuestion: (question: Omit<Question, 'id'>) => Question;
   updateQuestion: (question: Question) => void;
   deleteQuestion: (id: string) => void;
+  clearAllQuestions: () => void;
+  resetToZero: () => void;
   getUserAttempts: (userId?: string) => ExamAttempt[];
   getCategoryPerformance: (userId?: string) => CategoryPerformance[];
   getOverallReadiness: (userId?: string) => number;
@@ -106,19 +157,8 @@ interface AppContextType {
 
 const STORAGE_KEY_PREFIX = 'condutorpro_';
 
+// Pristine clean setup: only 1 initial admin user Rui Pires. ZERO mock students.
 const DEFAULT_USERS: User[] = [
-  {
-    id: 'user-student-1',
-    name: 'João Silva',
-    email: 'aluno@condutorpro.pt',
-    role: 'student',
-    subscriptionStatus: 'free_trial',
-    freeTestCompleted: false,
-    enrolledCategory: 'Categoria B',
-    nif: '254890123',
-    createdAt: '2026-10-15T10:00:00Z',
-    seenQuestionIds: []
-  },
   {
     id: 'user-admin-1',
     name: 'Rui Pires (Administrador)',
@@ -132,68 +172,21 @@ const DEFAULT_USERS: User[] = [
   }
 ];
 
-const DEFAULT_INVOICES: BillingInvoice[] = [
-  {
-    id: 'inv-1001',
-    invoiceNumber: 'FT-2026/089',
-    userId: 'user-student-2',
-    userName: 'Mariana Costa',
-    userEmail: 'mariana.costa@gmail.com',
-    userNif: '234567891',
-    amount: 5.00,
-    currency: 'EUR',
-    date: '2026-10-28T14:22:00Z',
-    paymentMethod: 'Stripe Card',
-    status: 'pago',
-    stripePaymentId: 'pi_3Nx809qLkjhd123'
-  },
-  {
-    id: 'inv-1002',
-    invoiceNumber: 'FT-2026/090',
-    userId: 'user-student-3',
-    userName: 'Tiago Ferreira',
-    userEmail: 't.ferreira99@sapo.pt',
-    userNif: '267891234',
-    amount: 5.00,
-    currency: 'EUR',
-    date: '2026-10-29T09:15:00Z',
-    paymentMethod: 'MB WAY',
-    status: 'pago',
-    stripePaymentId: 'pi_3Nx810qLkjhd456'
-  },
-  {
-    id: 'inv-1003',
-    invoiceNumber: 'FT-2026/091',
-    userId: 'user-student-4',
-    userName: 'Beatriz Santos',
-    userEmail: 'beatriz.santos@outlook.pt',
-    userNif: '289012345',
-    amount: 5.00,
-    currency: 'EUR',
-    date: '2026-10-30T16:40:00Z',
-    paymentMethod: 'Stripe Card',
-    status: 'pago',
-    stripePaymentId: 'pi_3Nx811qLkjhd789'
-  },
-  {
-    id: 'inv-1004',
-    invoiceNumber: 'FT-2026/092',
-    userId: 'user-student-5',
-    userName: 'Pedro Rodrigues',
-    userEmail: 'pedro.rodrigues@gmail.com',
-    userNif: '211223344',
-    amount: 5.00,
-    currency: 'EUR',
-    date: '2026-10-31T01:10:00Z',
-    paymentMethod: 'Multibanco',
-    status: 'pago',
-    stripePaymentId: 'pi_3Nx812qLkjhd999'
-  }
-];
-
 const AppContext = createContext<AppContextType | null>(null);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Airtable PAT token
+  const [airtableToken, setAirtableTokenState] = useState<string>(() => {
+    return localStorage.getItem(`${STORAGE_KEY_PREFIX}airtable_token`) || '';
+  });
+
+  const setAirtableToken = (token: string) => {
+    const clean = token.replace(/^Bearer\s+/i, '').replace(/[\r\n\t"']/g, '').trim();
+    setAirtableTokenState(clean);
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}airtable_token`, clean);
+  };
+
+  // Category Exam Configurations
   const [categoryConfigs, setCategoryConfigs] = useState<Record<DriverCategory, CategoryExamConfig>>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}categoryConfigs`);
     if (saved) {
@@ -207,15 +200,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return DEFAULT_CATEGORY_CONFIGS;
   });
 
+  // Airtable Category Configurations
+  const [categoryAirtableConfigs, setCategoryAirtableConfigs] = useState<Record<DriverCategory, CategoryAirtableConfig>>(() => {
+    const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}categoryAirtableConfigs`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return { ...DEFAULT_CATEGORY_AIRTABLE_CONFIGS, ...parsed };
+      } catch {
+        return DEFAULT_CATEGORY_AIRTABLE_CONFIGS;
+      }
+    }
+    return DEFAULT_CATEGORY_AIRTABLE_CONFIGS;
+  });
+
+  // Registered Users: purge any mock sample students from legacy localStorage
   const [users, setUsers] = useState<User[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}users`);
     if (saved) {
       try {
-        const parsed = JSON.parse(saved);
-        return parsed.map((u: any) => ({
-          ...u,
-          enrolledCategory: u.enrolledCategory || 'Categoria B'
-        }));
+        const parsed: User[] = JSON.parse(saved);
+        // Exclude sample students like 'user-student-1', 'user-student-2', etc.
+        const clean = parsed.filter(u => !u.id.startsWith('user-student-'));
+        return clean.length > 0 ? clean : DEFAULT_USERS;
       } catch {
         return DEFAULT_USERS;
       }
@@ -223,15 +230,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return DEFAULT_USERS;
   });
 
+  // Active User: Defaults to admin
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}currentUser`);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        return {
-          ...parsed,
-          enrolledCategory: parsed.enrolledCategory || 'Categoria B'
-        };
+        if (parsed.id && parsed.id.startsWith('user-student-')) {
+          return DEFAULT_USERS[0];
+        }
+        return parsed;
       } catch {
         return DEFAULT_USERS[0];
       }
@@ -239,36 +247,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return DEFAULT_USERS[0];
   });
 
+  // Questions Bank: Starts completely empty at 0. Purges legacy sample questions.
   const [questions, setQuestions] = useState<Question[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}questions`);
     if (saved) {
       try {
         const parsed: Question[] = JSON.parse(saved);
-        return parsed.map(q => ({
-          ...q,
-          targetCategory: q.targetCategory || 'Todas as Categorias'
-        }));
+        // Clean out any legacy mock questions starting with 'imt-' or 'demo-sample-'
+        const clean = parsed.filter(
+          q => !q.id.startsWith('imt-') && !q.id.startsWith('demo-sample-')
+        );
+        return clean;
       } catch {
-        return INITIAL_QUESTIONS.map(q => ({ ...q, targetCategory: 'Todas as Categorias' }));
+        return [];
       }
     }
-    return INITIAL_QUESTIONS.map(q => ({ ...q, targetCategory: 'Todas as Categorias' }));
+    return [];
   });
 
+  // Exam Attempts: Starts completely empty at 0.
   const [attempts, setAttempts] = useState<ExamAttempt[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}attempts`);
     return saved ? JSON.parse(saved) : [];
   });
 
+  // Billing Invoices: Starts completely empty at 0. Purges legacy sample invoices.
   const [invoices, setInvoices] = useState<BillingInvoice[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}invoices`);
-    return saved ? JSON.parse(saved) : DEFAULT_INVOICES;
+    if (saved) {
+      try {
+        const parsed: BillingInvoice[] = JSON.parse(saved);
+        // Filter out legacy dummy invoices starting with 'inv-100'
+        return parsed.filter(inv => !inv.id.startsWith('inv-100'));
+      } catch {
+        return [];
+      }
+    }
+    return [];
   });
+
+  // Background Sync state
+  const [isSyncingAirtable, setIsSyncingAirtable] = useState(false);
+  const [lastAutoSyncTime, setLastAutoSyncTime] = useState<string | null>(null);
+  const [autoSyncStatus, setAutoSyncStatus] = useState<{ success: boolean; message: string; timestamp: string } | null>(null);
 
   // Sync to localStorage
   useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY_PREFIX}categoryConfigs`, JSON.stringify(categoryConfigs));
   }, [categoryConfigs]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}categoryAirtableConfigs`, JSON.stringify(categoryAirtableConfigs));
+  }, [categoryAirtableConfigs]);
 
   useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY_PREFIX}users`, JSON.stringify(users));
@@ -301,6 +331,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCategoryConfigs(DEFAULT_CATEGORY_CONFIGS);
   };
 
+  const updateCategoryAirtableConfig = (category: DriverCategory, patch: Partial<CategoryAirtableConfig>) => {
+    setCategoryAirtableConfigs(prev => ({
+      ...prev,
+      [category]: {
+        ...prev[category],
+        ...patch,
+        category
+      }
+    }));
+  };
+
   const updateUserCategory = (category: DriverCategory, userId?: string) => {
     const targetId = userId || currentUser?.id;
     if (!targetId) return;
@@ -309,6 +350,233 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCurrentUser(prev => prev ? { ...prev, enrolledCategory: category } : null);
     }
   };
+
+  const clearAllQuestions = () => {
+    setQuestions([]);
+    localStorage.removeItem(`${STORAGE_KEY_PREFIX}questions`);
+  };
+
+  const resetToZero = () => {
+    setQuestions([]);
+    setAttempts([]);
+    setInvoices([]);
+    setUsers(DEFAULT_USERS);
+    setCurrentUser(DEFAULT_USERS[0]);
+    localStorage.removeItem(`${STORAGE_KEY_PREFIX}questions`);
+    localStorage.removeItem(`${STORAGE_KEY_PREFIX}attempts`);
+    localStorage.removeItem(`${STORAGE_KEY_PREFIX}invoices`);
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}users`, JSON.stringify(DEFAULT_USERS));
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}currentUser`, JSON.stringify(DEFAULT_USERS[0]));
+  };
+
+  /**
+   * Syncs questions for a single category from Airtable
+   */
+  const syncCategoryFromAirtable = async (
+    category: DriverCategory,
+    tokenOverride?: string
+  ): Promise<{ success: boolean; count: number; message: string }> => {
+    const token = (tokenOverride || airtableToken || '').trim();
+    const cfg = categoryAirtableConfigs[category];
+
+    if (!token) {
+      return { 
+        success: false, 
+        count: 0, 
+        message: 'Token de Acesso Pessoal (PAT) do Airtable em falta. Crie um token em airtable.com/create/tokens.' 
+      };
+    }
+
+    if (!cfg?.baseId || !cfg?.tableIdOrName) {
+      return { 
+        success: false, 
+        count: 0, 
+        message: `Configure o Base ID e a Tabela para a categoria ${category} antes de sincronizar.` 
+      };
+    }
+
+    setIsSyncingAirtable(true);
+    try {
+      const result = await fetchQuestionsFromAirtableApi(token, cfg.baseId, cfg.tableIdOrName, category);
+
+      if (result.questions.length === 0 && result.errors.length > 0) {
+        return {
+          success: false,
+          count: 0,
+          message: result.errors[0] || 'A tabela do Airtable não devolveu perguntas válidas.'
+        };
+      }
+
+      const taggedQuestions = result.questions.map(q => ({
+        ...q,
+        targetCategory: category
+      }));
+
+      // Update question bank: replace existing questions for this category with freshly synced ones
+      setQuestions(prev => {
+        const remaining = prev.filter(q => q.targetCategory !== category);
+        return [...taggedQuestions, ...remaining];
+      });
+
+      const nowIso = new Date().toISOString();
+      const nowFormatted = new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+
+      setCategoryAirtableConfigs(prev => ({
+        ...prev,
+        [category]: {
+          ...prev[category],
+          lastSyncedAt: nowIso,
+          questionCount: taggedQuestions.length
+        }
+      }));
+
+      setLastAutoSyncTime(nowFormatted);
+      setAutoSyncStatus({
+        success: true,
+        message: `${taggedQuestions.length} perguntas sincronizadas com sucesso para ${category}!`,
+        timestamp: nowIso
+      });
+
+      return {
+        success: true,
+        count: taggedQuestions.length,
+        message: `Sincronizadas com sucesso ${taggedQuestions.length} perguntas para ${category}.`
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        count: 0,
+        message: err?.message || 'Falha na ligação com a API do Airtable.'
+      };
+    } finally {
+      setIsSyncingAirtable(false);
+    }
+  };
+
+  /**
+   * Syncs questions for ALL configured categories from Airtable
+   */
+  const syncAllCategoriesFromAirtable = async (
+    tokenOverride?: string
+  ): Promise<{ success: boolean; results: Record<string, number>; totalAdded: number; message: string }> => {
+    const token = (tokenOverride || airtableToken || '').trim();
+    if (!token) {
+      return { 
+        success: false, 
+        results: {}, 
+        totalAdded: 0, 
+        message: 'Token de Acesso Pessoal (PAT) do Airtable em falta. Crie um token com permissão "data.records:read".' 
+      };
+    }
+
+    setIsSyncingAirtable(true);
+    const results: Record<string, number> = {};
+    let totalAdded = 0;
+    const errors: string[] = [];
+
+    try {
+      for (const cat of ALL_DRIVER_CATEGORIES) {
+        const cfg = categoryAirtableConfigs[cat];
+        if (!cfg?.baseId || !cfg?.tableIdOrName) continue;
+
+        try {
+          const res = await fetchQuestionsFromAirtableApi(token, cfg.baseId, cfg.tableIdOrName, cat);
+          if (res.questions.length > 0) {
+            const tagged = res.questions.map(q => ({ ...q, targetCategory: cat }));
+            results[cat] = tagged.length;
+            totalAdded += tagged.length;
+
+            setQuestions(prev => {
+              const remaining = prev.filter(q => q.targetCategory !== cat);
+              return [...tagged, ...remaining];
+            });
+
+            setCategoryAirtableConfigs(prev => ({
+              ...prev,
+              [cat]: {
+                ...prev[cat],
+                lastSyncedAt: new Date().toISOString(),
+                questionCount: tagged.length
+              }
+            }));
+          }
+        } catch (catErr: any) {
+          errors.push(`${cat}: ${catErr?.message || 'Erro'}`);
+        }
+      }
+
+      const nowFormatted = new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+      setLastAutoSyncTime(nowFormatted);
+
+      if (totalAdded === 0 && errors.length > 0) {
+        return {
+          success: false,
+          results,
+          totalAdded: 0,
+          message: `Não foi possível sincronizar: ${errors[0]}`
+        };
+      }
+
+      return {
+        success: true,
+        results,
+        totalAdded,
+        message: `Sincronização global concluída! Total de ${totalAdded} perguntas atualizadas a partir do Airtable.`
+      };
+    } finally {
+      setIsSyncingAirtable(false);
+    }
+  };
+
+  /**
+   * Automatic background periodic sync:
+   * Every 3 minutes (180s), if a valid PAT token exists, automatically poll Airtable
+   * and refresh questions without user intervention so questions are always up to date.
+   */
+  useEffect(() => {
+    if (!airtableToken || airtableToken.length < 10) return;
+
+    const intervalId = setInterval(async () => {
+      const activeCategories = ALL_DRIVER_CATEGORIES.filter(cat => {
+        const cfg = categoryAirtableConfigs[cat];
+        return cfg && cfg.autoSync && cfg.baseId && cfg.tableIdOrName;
+      });
+
+      if (activeCategories.length === 0) return;
+
+      try {
+        for (const cat of activeCategories) {
+          const cfg = categoryAirtableConfigs[cat];
+          try {
+            const res = await fetchQuestionsFromAirtableApi(airtableToken, cfg.baseId, cfg.tableIdOrName, cat);
+            if (res.questions.length > 0) {
+              const tagged = res.questions.map(q => ({ ...q, targetCategory: cat }));
+              setQuestions(prev => {
+                const remaining = prev.filter(q => q.targetCategory !== cat);
+                return [...tagged, ...remaining];
+              });
+
+              setCategoryAirtableConfigs(prev => ({
+                ...prev,
+                [cat]: {
+                  ...prev[cat],
+                  lastSyncedAt: new Date().toISOString(),
+                  questionCount: tagged.length
+                }
+              }));
+            }
+          } catch {
+            // Background silent catch to not disrupt user experience
+          }
+        }
+        setLastAutoSyncTime(new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }));
+      } catch {
+        // Ignore background timer errors
+      }
+    }, 180000); // 3 minutes
+
+    return () => clearInterval(intervalId);
+  }, [airtableToken, categoryAirtableConfigs]);
 
   const login = async (email: string, role: 'student' | 'admin' = 'student'): Promise<boolean> => {
     let existing = users.find(u => u.email.toLowerCase() === email.toLowerCase());
@@ -403,7 +671,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       driverCategory: currentUser.enrolledCategory
     };
 
-    // Update student's seen questions & free trial flag
     const updatedSeen = Array.from(new Set([...currentUser.seenQuestionIds, ...data.questionIds]));
     const updatedUser: User = {
       ...currentUser,
@@ -425,7 +692,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }): Promise<BillingInvoice> => {
     if (!currentUser) throw new Error('Utilizador não autenticado.');
 
-    const invoiceNum = `FT-2026/${String(invoices.length + 93).padStart(3, '0')}`;
+    const invoiceNum = `FT-2026/${String(invoices.length + 1).padStart(3, '0')}`;
     const newInvoice: BillingInvoice = {
       id: `inv-${Date.now()}`,
       invoiceNumber: invoiceNum,
@@ -469,14 +736,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         );
 
         if (existingIdx >= 0) {
-          // Update existing question with fresh fields from Airtable sync
           updated[existingIdx] = {
             ...updated[existingIdx],
             ...newQ
           };
           affectedCount++;
         } else {
-          // Insert new question
           updated.unshift(newQ);
           affectedCount++;
         }
@@ -581,8 +846,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         attempts,
         invoices,
         categoryConfigs,
+        categoryAirtableConfigs,
+        airtableToken,
+        isSyncingAirtable,
+        lastAutoSyncTime,
+        autoSyncStatus,
+        setAirtableToken,
         updateCategoryConfig,
         resetCategoryConfigs,
+        updateCategoryAirtableConfig,
+        syncCategoryFromAirtable,
+        syncAllCategoriesFromAirtable,
         updateUserCategory,
         login,
         loginWithGoogle,
@@ -595,6 +869,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addQuestion,
         updateQuestion,
         deleteQuestion,
+        clearAllQuestions,
+        resetToZero,
         getUserAttempts,
         getCategoryPerformance,
         getOverallReadiness,

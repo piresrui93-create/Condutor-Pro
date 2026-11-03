@@ -68,17 +68,19 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           <span>Estatísticas</span>
         </button>
 
-        <button
-          onClick={() => onNavigate('admin')}
-          className={`flex flex-col items-center justify-center flex-1 py-1 text-[11px] font-medium transition-colors ${
-            currentView === 'admin' || currentView === 'billing'
-              ? 'text-emerald-600 dark:text-emerald-400'
-              : 'text-slate-500 dark:text-slate-400'
-          }`}
-        >
-          <ShieldCheck className="w-5 h-5 mb-0.5" />
-          <span>Admin</span>
-        </button>
+        {currentUser?.role === 'admin' && (
+          <button
+            onClick={() => onNavigate('admin')}
+            className={`flex flex-col items-center justify-center flex-1 py-1 text-[11px] font-medium transition-colors ${
+              currentView === 'admin' || currentView === 'billing'
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-slate-500 dark:text-slate-400'
+            }`}
+          >
+            <ShieldCheck className="w-5 h-5 mb-0.5" />
+            <span>Admin</span>
+          </button>
+        )}
 
       </div>
     </div>
